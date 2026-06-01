@@ -8,7 +8,13 @@ final class AppState: ObservableObject {
     @Published var index: VaultIndex?
     @Published var selectedDocumentId: String?
     @Published var searchText = ""
-    @Published var trustMode: VaultTrustMode = .safe
+    @Published var trustMode: VaultTrustMode = .safe {
+        didSet {
+            if trustMode != .trusted {
+                allowsNetworkAccess = false
+            }
+        }
+    }
     @Published var allowsNetworkAccess = false
     @Published var errorMessage: String?
     @Published var isIndexing = false
@@ -19,6 +25,10 @@ final class AppState: ObservableObject {
     var selectedDocument: DocumentNode? {
         guard let selectedDocumentId else { return nil }
         return index?.document(id: selectedDocumentId)
+    }
+
+    var securityPolicy: VaultSecurityPolicy {
+        VaultSecurityPolicy(mode: trustMode, allowsNetworkAccess: allowsNetworkAccess)
     }
 
     var filteredDocuments: [DocumentNode] {

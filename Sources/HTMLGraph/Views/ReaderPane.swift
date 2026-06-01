@@ -1,3 +1,4 @@
+import HTMLGraphCore
 import SwiftUI
 
 struct ReaderPane: View {
@@ -22,12 +23,17 @@ struct ReaderPane: View {
 
                     Spacer()
 
-                    Text(appState.trustMode == .safe ? "Safe Mode" : "Trusted Mode")
-                        .font(.caption)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.quaternary)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    Picker("Trust", selection: $appState.trustMode) {
+                        Text("Safe").tag(VaultTrustMode.safe)
+                        Text("Trusted").tag(VaultTrustMode.trusted)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 150)
+
+                    Toggle("Network", isOn: $appState.allowsNetworkAccess)
+                        .toggleStyle(.switch)
+                        .disabled(appState.trustMode != .trusted)
+                        .help("Network access is controlled separately from Trusted Mode.")
 
                     Button("Open External") {
                         let didOpen = NSWorkspace.shared.open(URL(fileURLWithPath: document.absolutePath))
@@ -44,6 +50,7 @@ struct ReaderPane: View {
                     HTMLDocumentWebView(
                         documentURL: URL(fileURLWithPath: document.absolutePath),
                         vaultURL: vaultURL,
+                        policy: appState.securityPolicy,
                         knownDocumentIds: Set(appState.index?.documents.map(\.id) ?? []),
                         onInternalNavigation: { relativePath in
                             appState.selectDocument(relativePath)
@@ -58,6 +65,7 @@ struct ReaderPane: View {
                             appState.errorMessage = message
                         }
                     )
+                    .id(webViewIdentity(for: document, vaultURL: vaultURL))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ContentUnavailableView(
@@ -76,5 +84,14 @@ struct ReaderPane: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+    }
+
+    private func webViewIdentity(for document: DocumentNode, vaultURL: URL) -> String {
+        [
+            vaultURL.standardizedFileURL.path,
+            document.id,
+            appState.trustMode.rawValue,
+            String(appState.allowsNetworkAccess)
+        ].joined(separator: "|")
     }
 }
