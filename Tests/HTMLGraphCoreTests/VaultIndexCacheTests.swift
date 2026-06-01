@@ -49,6 +49,30 @@ final class VaultIndexCacheTests: XCTestCase {
         XCTAssertNil(loaded)
     }
 
+    func testSavedJSONUsesISO8601FractionalDates() throws {
+        let cacheRoot = makeTemporaryDirectory().appendingPathComponent("cache", isDirectory: true)
+        let cache = VaultIndexCache(rootURL: cacheRoot)
+        let index = VaultIndex(
+            vaultId: "fixture",
+            documents: [],
+            edges: [],
+            backlinks: [:],
+            unresolvedLinks: [:],
+            lastIndexedAt: Date(timeIntervalSince1970: 1.234)
+        )
+        defer { try? FileManager.default.removeItem(at: cacheRoot.deletingLastPathComponent()) }
+
+        try cache.save(index)
+
+        let cacheFile = try XCTUnwrap(FileManager.default.contentsOfDirectory(
+            at: cacheRoot,
+            includingPropertiesForKeys: nil
+        ).first)
+        let json = try String(contentsOf: cacheFile, encoding: .utf8)
+
+        XCTAssertTrue(json.contains("\"lastIndexedAt\" : \"1970-01-01T00:00:01.234Z\""), json)
+    }
+
     func testHostileVaultIdWritesOnlyUnderCacheRoot() throws {
         let tempRoot = makeTemporaryDirectory()
         let cacheRoot = tempRoot.appendingPathComponent("cache", isDirectory: true)

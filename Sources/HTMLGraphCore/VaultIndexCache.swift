@@ -44,7 +44,7 @@ public struct VaultIndexCache {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .custom { date, encoder in
             var container = encoder.singleValueContainer()
-            try container.encode(date.timeIntervalSince1970)
+            try container.encode(iso8601Formatter().string(from: date))
         }
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
@@ -54,8 +54,23 @@ public struct VaultIndexCache {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
-            return Date(timeIntervalSince1970: try container.decode(Double.self))
+            let dateString = try container.decode(String.self)
+
+            guard let date = iso8601Formatter().date(from: dateString) else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Expected ISO8601 date with fractional seconds."
+                )
+            }
+
+            return date
         }
         return decoder
+    }
+
+    private static func iso8601Formatter() -> ISO8601DateFormatter {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
     }
 }
