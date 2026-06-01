@@ -10,8 +10,7 @@ struct ContextPane: View {
                 .tabItem { Text("Backlinks") }
             unresolvedLinksView
                 .tabItem { Text("Unresolved") }
-            Text("Local graph is added in Task 8")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            localGraphView
                 .tabItem { Text("Local Graph") }
         }
     }
@@ -39,6 +38,26 @@ struct ContextPane: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var localGraphView: some View {
+        if let index = appState.index {
+            GraphWebView(
+                centerId: appState.selectedDocumentId,
+                index: index,
+                global: false,
+                onSelect: { id in
+                    appState.selectDocument(id)
+                }
+            )
+        } else {
+            ContentUnavailableView(
+                "No vault open",
+                systemImage: "folder",
+                description: Text("Open a local HTML vault to view document links.")
+            )
         }
     }
 

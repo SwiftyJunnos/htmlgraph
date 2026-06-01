@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct HTMLGraphApp: App {
     @StateObject private var appState = AppState()
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         WindowGroup {
@@ -16,7 +17,17 @@ struct HTMLGraphApp: App {
                     chooseVault()
                 }
                 .keyboardShortcut("o", modifiers: .command)
+
+                Button("Global Graph") {
+                    openWindow(id: "global-graph")
+                }
+                .keyboardShortcut("g", modifiers: .command)
             }
+        }
+
+        Window("Global Graph", id: "global-graph") {
+            GlobalGraphView()
+                .environmentObject(appState)
         }
     }
 
