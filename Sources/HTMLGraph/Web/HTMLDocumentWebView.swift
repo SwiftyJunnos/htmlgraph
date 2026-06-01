@@ -105,7 +105,11 @@ struct HTMLDocumentWebView: NSViewRepresentable {
             )
             let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
 
-            switch policy.decision(for: url, isMainFrame: isMainFrame) {
+            switch policy.decision(
+                for: url,
+                isMainFrame: isMainFrame,
+                isUserInitiated: navigationAction.navigationType == .linkActivated
+            ) {
             case .allow:
                 decisionHandler(.allow)
             case .internalDocument(let relativePath):

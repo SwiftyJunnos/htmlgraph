@@ -13,21 +13,24 @@ final class HTMLDocumentNavigationPolicyTests: XCTestCase {
         let policy = makePolicy()
         let url = URL(fileURLWithPath: "/tmp/vault2/index.html")
 
-        XCTAssertEqual(policy.decision(for: url, isMainFrame: true), .external(url))
+        XCTAssertEqual(policy.decision(for: url, isMainFrame: true, isUserInitiated: true), .external(url))
     }
 
     func testKnownInternalDocumentSelectsDocument() {
         let policy = makePolicy()
         let url = vaultURL.appendingPathComponent("notes/graph.html")
 
-        XCTAssertEqual(policy.decision(for: url, isMainFrame: true), .internalDocument("notes/graph.html"))
+        XCTAssertEqual(
+            policy.decision(for: url, isMainFrame: true, isUserInitiated: true),
+            .internalDocument("notes/graph.html")
+        )
     }
 
     func testUnknownInternalAssetReturnsError() {
         let policy = makePolicy()
         let url = vaultURL.appendingPathComponent("assets/logo.svg")
 
-        guard case .error(let message) = policy.decision(for: url, isMainFrame: true) else {
+        guard case .error(let message) = policy.decision(for: url, isMainFrame: true, isUserInitiated: true) else {
             return XCTFail("Expected error for unknown internal asset")
         }
         XCTAssertTrue(message.contains("assets/logo.svg"))
@@ -37,27 +40,42 @@ final class HTMLDocumentNavigationPolicyTests: XCTestCase {
         let policy = makePolicy()
 
         XCTAssertEqual(
-            policy.decision(for: URL(string: "file:///tmp/vault/index.html#section")!, isMainFrame: true),
+            policy.decision(
+                for: URL(string: "file:///tmp/vault/index.html#section")!,
+                isMainFrame: true,
+                isUserInitiated: true
+            ),
             .allow
         )
         XCTAssertEqual(
-            policy.decision(for: URL(string: "file:///tmp/vault/index.html#other")!, isMainFrame: true),
+            policy.decision(
+                for: URL(string: "file:///tmp/vault/index.html#other")!,
+                isMainFrame: true,
+                isUserInitiated: false
+            ),
             .allow
         )
     }
 
-    func testExternalURLReturnsExternal() {
+    func testUserInitiatedExternalURLReturnsExternal() {
         let policy = makePolicy()
         let url = URL(string: "https://example.com")!
 
-        XCTAssertEqual(policy.decision(for: url, isMainFrame: true), .external(url))
+        XCTAssertEqual(policy.decision(for: url, isMainFrame: true, isUserInitiated: true), .external(url))
     }
 
-    func testMainFrameExternalNavigationIsCanceledAsExternal() {
+    func testNonUserInitiatedExternalNavigationReturnsError() {
         let policy = makePolicy()
         let url = URL(string: "https://example.com/redirect")!
 
-        XCTAssertEqual(policy.decision(for: url, isMainFrame: true), .external(url))
+        guard case .error(let message) = policy.decision(
+            for: url,
+            isMainFrame: true,
+            isUserInitiated: false
+        ) else {
+            return XCTFail("Expected error for non-user-initiated external navigation")
+        }
+        XCTAssertTrue(message.contains("https://example.com/redirect"))
     }
 
     private func makePolicy() -> HTMLDocumentNavigationPolicy {

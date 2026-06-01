@@ -12,15 +12,19 @@ struct HTMLDocumentNavigationPolicy {
     let vaultURL: URL
     let knownDocumentIds: Set<String>
 
-    func decision(for targetURL: URL, isMainFrame: Bool) -> HTMLDocumentNavigationDecision {
+    func decision(
+        for targetURL: URL,
+        isMainFrame: Bool,
+        isUserInitiated: Bool
+    ) -> HTMLDocumentNavigationDecision {
         guard isMainFrame else { return .allow }
 
         guard targetURL.isFileURL else {
-            return .external(targetURL)
+            return externalDecision(for: targetURL, isUserInitiated: isUserInitiated)
         }
 
         guard let relativePath = vaultRelativePath(for: targetURL, in: vaultURL) else {
-            return .external(targetURL)
+            return externalDecision(for: targetURL, isUserInitiated: isUserInitiated)
         }
 
         if relativePath == vaultRelativePath(for: currentDocumentURL, in: vaultURL) {
@@ -32,6 +36,17 @@ struct HTMLDocumentNavigationPolicy {
         }
 
         return .internalDocument(relativePath)
+    }
+
+    private func externalDecision(
+        for targetURL: URL,
+        isUserInitiated: Bool
+    ) -> HTMLDocumentNavigationDecision {
+        if isUserInitiated {
+            return .external(targetURL)
+        }
+
+        return .error("Blocked non-user-initiated external navigation: \(targetURL.absoluteString)")
     }
 
     private func vaultRelativePath(for fileURL: URL, in vaultURL: URL) -> String? {
