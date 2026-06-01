@@ -44,7 +44,7 @@ public struct VaultIndexCache {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .custom { date, encoder in
             var container = encoder.singleValueContainer()
-            try container.encode(iso8601Formatter().string(from: date))
+            try container.encode(iso8601String(from: date))
         }
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
@@ -56,10 +56,10 @@ public struct VaultIndexCache {
             let container = try decoder.singleValueContainer()
             let dateString = try container.decode(String.self)
 
-            guard let date = iso8601Formatter().date(from: dateString) else {
+            guard let date = date(fromISO8601String: dateString) else {
                 throw DecodingError.dataCorruptedError(
                     in: container,
-                    debugDescription: "Expected ISO8601 date with fractional seconds."
+                    debugDescription: "Expected ISO8601 UTC date with fractional seconds."
                 )
             }
 
@@ -68,9 +68,51 @@ public struct VaultIndexCache {
         return decoder
     }
 
-    private static func iso8601Formatter() -> ISO8601DateFormatter {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    private static func iso8601String(from date: Date) -> String {
+        var wholeSeconds = floor(date.timeIntervalSinceReferenceDate)
+        let fraction = date.timeIntervalSinceReferenceDate - wholeSeconds
+        var fractionalUnits = (fraction * fractionalScale).rounded()
+
+        if fractionalUnits >= fractionalScale {
+            wholeSeconds += 1
+            fractionalUnits = 0
+        }
+
+        let wholeSecondString = wholeSecondFormatter()
+            .string(from: Date(timeIntervalSinceReferenceDate: wholeSeconds))
+        let fractionalString = String(format: "%017.0f", fractionalUnits)
+
+        return "\(wholeSecondString).\(fractionalString)Z"
+    }
+
+    private static func date(fromISO8601String string: String) -> Date? {
+        guard string.hasSuffix("Z"),
+              let separator = string.firstIndex(of: ".") else {
+            return nil
+        }
+
+        let wholeSecondString = String(string[..<separator])
+        let fractionStart = string.index(after: separator)
+        let fractionEnd = string.index(before: string.endIndex)
+        let fractionString = String(string[fractionStart..<fractionEnd])
+
+        guard !fractionString.isEmpty,
+              fractionString.allSatisfy(\.isNumber),
+              let wholeSecondDate = wholeSecondFormatter().date(from: wholeSecondString),
+              let fraction = Double("0.\(fractionString)") else {
+            return nil
+        }
+
+        return Date(timeInterval: fraction, since: wholeSecondDate)
+    }
+
+    private static func wholeSecondFormatter() -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
         return formatter
     }
+
+    private static let fractionalScale = 100_000_000_000_000_000.0
 }

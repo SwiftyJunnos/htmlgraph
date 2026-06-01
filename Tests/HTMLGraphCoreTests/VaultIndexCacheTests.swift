@@ -29,7 +29,7 @@ final class VaultIndexCacheTests: XCTestCase {
             edges: [edge],
             backlinks: ["notes/graph.html": [edge]],
             unresolvedLinks: [:],
-            lastIndexedAt: Date(timeIntervalSince1970: 1_717_171_717.25)
+            lastIndexedAt: Date(timeIntervalSince1970: 1.234567)
         )
         defer { try? FileManager.default.removeItem(at: cacheRoot.deletingLastPathComponent()) }
 
@@ -58,7 +58,7 @@ final class VaultIndexCacheTests: XCTestCase {
             edges: [],
             backlinks: [:],
             unresolvedLinks: [:],
-            lastIndexedAt: Date(timeIntervalSince1970: 1.234)
+            lastIndexedAt: Date(timeIntervalSince1970: 1.234567)
         )
         defer { try? FileManager.default.removeItem(at: cacheRoot.deletingLastPathComponent()) }
 
@@ -70,7 +70,7 @@ final class VaultIndexCacheTests: XCTestCase {
         ).first)
         let json = try String(contentsOf: cacheFile, encoding: .utf8)
 
-        XCTAssertTrue(json.contains("\"lastIndexedAt\" : \"1970-01-01T00:00:01.234Z\""), json)
+        XCTAssertTrue(json.contains("\"lastIndexedAt\" : \"1970-01-01T00:00:01.23456704616546632Z\""), json)
     }
 
     func testHostileVaultIdWritesOnlyUnderCacheRoot() throws {
