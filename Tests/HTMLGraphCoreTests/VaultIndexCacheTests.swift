@@ -49,6 +49,34 @@ final class VaultIndexCacheTests: XCTestCase {
         XCTAssertNil(loaded)
     }
 
+    func testRoundTripsHighPrecisionDatesExactly() throws {
+        let dates = [
+            Date(timeIntervalSince1970: 1.234567),
+            Date(timeIntervalSinceReferenceDate: -0.000001),
+            Date(timeIntervalSinceReferenceDate: 1.999999),
+            Date(timeIntervalSince1970: 1_717_171_717.123456)
+        ]
+        let cacheRoot = makeTemporaryDirectory().appendingPathComponent("cache", isDirectory: true)
+        let cache = VaultIndexCache(rootURL: cacheRoot)
+        defer { try? FileManager.default.removeItem(at: cacheRoot.deletingLastPathComponent()) }
+
+        for (offset, date) in dates.enumerated() {
+            let index = VaultIndex(
+                vaultId: "fixture-\(offset)",
+                documents: [],
+                edges: [],
+                backlinks: [:],
+                unresolvedLinks: [:],
+                lastIndexedAt: date
+            )
+
+            try cache.save(index)
+            let loaded = try cache.load(vaultId: index.vaultId)
+
+            XCTAssertEqual(loaded?.lastIndexedAt, date, "Failed to round-trip \(date.timeIntervalSinceReferenceDate)")
+        }
+    }
+
     func testSavedJSONUsesISO8601FractionalDates() throws {
         let cacheRoot = makeTemporaryDirectory().appendingPathComponent("cache", isDirectory: true)
         let cache = VaultIndexCache(rootURL: cacheRoot)
