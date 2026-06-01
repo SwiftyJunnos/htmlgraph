@@ -108,6 +108,28 @@ final class VaultIndexerTests: XCTestCase {
         XCTAssertEqual(escaped.status, .unresolved)
     }
 
+    func testPercentEncodedLocalHTMLLinksResolveToDecodedDocumentPaths() {
+        let normalizer = LinkNormalizer()
+        let knownDocumentIds: Set<String> = ["My Page.html", "notes/Other Page.html"]
+
+        let rootDocument = normalizer.normalize(
+            href: "./My%20Page.html",
+            sourcePath: "index.html",
+            knownDocumentIds: knownDocumentIds
+        )
+        XCTAssertEqual(rootDocument.targetPath, "My Page.html")
+        XCTAssertEqual(rootDocument.status, .resolved)
+
+        let nestedDocument = normalizer.normalize(
+            href: "./Other%20Page.html#section",
+            sourcePath: "notes/index.html",
+            knownDocumentIds: knownDocumentIds
+        )
+        XCTAssertEqual(nestedDocument.targetPath, "notes/Other Page.html")
+        XCTAssertEqual(nestedDocument.fragment, "section")
+        XCTAssertEqual(nestedDocument.status, .resolved)
+    }
+
     private func makeTemporaryVault(files: [String: String]) throws -> URL {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("HTMLGraphTests-\(UUID().uuidString)", isDirectory: true)

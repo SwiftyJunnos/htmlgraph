@@ -78,6 +78,44 @@ final class HTMLDocumentNavigationPolicyTests: XCTestCase {
         XCTAssertTrue(message.contains("https://example.com/redirect"))
     }
 
+    func testNonMainFrameExternalNavigationReturnsError() {
+        let policy = makePolicy()
+        let url = URL(string: "https://example.com/frame.html")!
+
+        guard case .error(let message) = policy.decision(
+            for: url,
+            isMainFrame: false,
+            isUserInitiated: false
+        ) else {
+            return XCTFail("Expected error for external subframe navigation")
+        }
+        XCTAssertTrue(message.contains("https://example.com/frame.html"))
+    }
+
+    func testNonMainFrameVaultFileAllowsNavigation() {
+        let policy = makePolicy()
+        let url = vaultURL.appendingPathComponent("embedded.html")
+
+        XCTAssertEqual(
+            policy.decision(for: url, isMainFrame: false, isUserInitiated: false),
+            .allow
+        )
+    }
+
+    func testNonMainFrameFileOutsideVaultReturnsError() {
+        let policy = makePolicy()
+        let url = URL(fileURLWithPath: "/tmp/secret.html")
+
+        guard case .error(let message) = policy.decision(
+            for: url,
+            isMainFrame: false,
+            isUserInitiated: false
+        ) else {
+            return XCTFail("Expected error for outside-vault subframe navigation")
+        }
+        XCTAssertTrue(message.contains("secret.html"))
+    }
+
     private func makePolicy() -> HTMLDocumentNavigationPolicy {
         HTMLDocumentNavigationPolicy(
             currentDocumentURL: vaultURL.appendingPathComponent("index.html"),

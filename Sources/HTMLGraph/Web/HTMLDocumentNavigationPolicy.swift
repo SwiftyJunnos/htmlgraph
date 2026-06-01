@@ -17,7 +17,9 @@ struct HTMLDocumentNavigationPolicy {
         isMainFrame: Bool,
         isUserInitiated: Bool
     ) -> HTMLDocumentNavigationDecision {
-        guard isMainFrame else { return .allow }
+        guard isMainFrame else {
+            return subframeDecision(for: targetURL)
+        }
 
         guard targetURL.isFileURL else {
             return externalDecision(for: targetURL, isUserInitiated: isUserInitiated)
@@ -36,6 +38,14 @@ struct HTMLDocumentNavigationPolicy {
         }
 
         return .internalDocument(relativePath)
+    }
+
+    private func subframeDecision(for targetURL: URL) -> HTMLDocumentNavigationDecision {
+        guard targetURL.isFileURL, vaultRelativePath(for: targetURL, in: vaultURL) != nil else {
+            return .error("Blocked subframe navigation outside the selected vault: \(targetURL.absoluteString)")
+        }
+
+        return .allow
     }
 
     private func externalDecision(

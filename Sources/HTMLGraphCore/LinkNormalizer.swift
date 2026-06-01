@@ -48,7 +48,9 @@ public struct LinkNormalizer {
             return NormalizedLink(targetPath: sourcePath, fragment: fragment, status: .sameDocument)
         }
 
-        guard let relative = normalizedPath(pathPart, sourcePath: sourcePath) else {
+        guard let decodedPathPart = pathPart.removingPercentEncoding,
+              !decodedPathPart.contains("\0"),
+              let relative = normalizedPath(decodedPathPart, sourcePath: sourcePath) else {
             return NormalizedLink(targetPath: nil, fragment: fragment, status: .unresolved)
         }
 
