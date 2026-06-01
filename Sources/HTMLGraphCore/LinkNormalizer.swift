@@ -21,7 +21,11 @@ public struct LinkNormalizer {
             return NormalizedLink(targetPath: nil, fragment: nil, status: .unresolved)
         }
 
-        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") || trimmed.hasPrefix("mailto:") {
+        if trimmed.hasPrefix("//") {
+            return NormalizedLink(targetPath: nil, fragment: nil, status: .external)
+        }
+
+        if let scheme = scheme(in: trimmed), scheme != "file" {
             return NormalizedLink(targetPath: nil, fragment: nil, status: .external)
         }
 
@@ -40,16 +44,63 @@ public struct LinkNormalizer {
             .map(String.init) ?? ""
         let fragment = parts.count > 1 ? String(parts[1]) : nil
 
-        let sourceDirectory = (sourcePath as NSString).deletingLastPathComponent
-        let joined = sourceDirectory.isEmpty ? pathPart : "\(sourceDirectory)/\(pathPart)"
-        let relative = (joined as NSString).standardizingPath
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !pathPart.isEmpty else {
+            return NormalizedLink(targetPath: sourcePath, fragment: fragment, status: .sameDocument)
+        }
 
-        guard relative.hasSuffix(".html") || relative.hasSuffix(".htm") else {
+        guard let relative = normalizedPath(pathPart, sourcePath: sourcePath) else {
+            return NormalizedLink(targetPath: nil, fragment: fragment, status: .unresolved)
+        }
+
+        let pathExtension = (relative as NSString).pathExtension.lowercased()
+        guard pathExtension == "html" || pathExtension == "htm" else {
             return NormalizedLink(targetPath: relative, fragment: fragment, status: .unresolved)
         }
 
         let status: LinkStatus = knownDocumentIds.contains(relative) ? .resolved : .unresolved
         return NormalizedLink(targetPath: relative, fragment: fragment, status: status)
+    }
+
+    private func scheme(in href: String) -> String? {
+        guard let colonIndex = href.firstIndex(of: ":") else { return nil }
+        let prefix = href[..<colonIndex]
+        guard !prefix.isEmpty else { return nil }
+
+        let boundaryCharacters = CharacterSet(charactersIn: "/?#")
+        if prefix.rangeOfCharacter(from: boundaryCharacters) != nil {
+            return nil
+        }
+
+        guard let first = prefix.unicodeScalars.first, CharacterSet.letters.contains(first) else {
+            return nil
+        }
+
+        let allowedCharacters = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-.")
+        guard prefix.unicodeScalars.allSatisfy({ allowedCharacters.contains($0) }) else {
+            return nil
+        }
+
+        return prefix.lowercased()
+    }
+
+    private func normalizedPath(_ path: String, sourcePath: String) -> String? {
+        var components: [String] = []
+        if !path.hasPrefix("/") {
+            components = sourcePath.split(separator: "/").dropLast().map(String.init)
+        }
+
+        for component in path.split(separator: "/", omittingEmptySubsequences: true).map(String.init) {
+            switch component {
+            case ".":
+                continue
+            case "..":
+                guard !components.isEmpty else { return nil }
+                components.removeLast()
+            default:
+                components.append(component)
+            }
+        }
+
+        return components.joined(separator: "/")
     }
 }

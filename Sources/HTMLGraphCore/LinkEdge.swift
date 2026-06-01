@@ -18,7 +18,7 @@ public struct RawHTMLLink: Equatable, Hashable {
 }
 
 public struct LinkEdge: Codable, Equatable, Identifiable, Hashable {
-    public var id: String { "\(sourceId)->\(href)" }
+    public let id: String
     public let sourceId: String
     public let targetId: String?
     public let href: String
@@ -28,6 +28,7 @@ public struct LinkEdge: Codable, Equatable, Identifiable, Hashable {
     public let status: LinkStatus
 
     public init(
+        id: String,
         sourceId: String,
         targetId: String?,
         href: String,
@@ -36,6 +37,7 @@ public struct LinkEdge: Codable, Equatable, Identifiable, Hashable {
         linkText: String,
         status: LinkStatus
     ) {
+        self.id = id
         self.sourceId = sourceId
         self.targetId = targetId
         self.href = href

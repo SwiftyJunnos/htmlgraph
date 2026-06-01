@@ -15,6 +15,7 @@ public struct VaultIndexer {
 
     public func indexVault(at vaultURL: URL) throws -> VaultIndex {
         let fileURLs = try htmlFiles(in: vaultURL)
+            .sorted { relativePath(for: $0, in: vaultURL) < relativePath(for: $1, in: vaultURL) }
         let knownIds = Set(fileURLs.map { relativePath(for: $0, in: vaultURL) })
 
         let documents = try fileURLs.map { fileURL in
@@ -29,19 +30,20 @@ public struct VaultIndexer {
                 contentHash: sha256(html),
                 lastModified: values.contentModificationDate ?? .distantPast
             )
-        }.sorted { $0.path < $1.path }
+        }
 
         var edges: [LinkEdge] = []
         for fileURL in fileURLs {
             let sourceId = relativePath(for: fileURL, in: vaultURL)
             let html = try String(contentsOf: fileURL, encoding: .utf8)
-            for rawLink in try extractor.links(from: html) {
+            for (ordinal, rawLink) in try extractor.links(from: html).enumerated() {
                 let normalized = normalizer.normalize(
                     href: rawLink.href,
                     sourcePath: sourceId,
                     knownDocumentIds: knownIds
                 )
                 edges.append(LinkEdge(
+                    id: "\(sourceId)#link-\(ordinal)",
                     sourceId: sourceId,
                     targetId: normalized.status == .resolved || normalized.status == .sameDocument ? normalized.targetPath : nil,
                     href: rawLink.href,
@@ -53,12 +55,12 @@ public struct VaultIndexer {
             }
         }
 
-        let backlinks = Dictionary(grouping: edges.filter { $0.status == .resolved }) { edge in
+        let backlinks = sortedGroups(Dictionary(grouping: edges.filter { $0.status == .resolved }) { edge in
             edge.targetId ?? ""
-        }
-        let unresolved = Dictionary(grouping: edges.filter { $0.status == .unresolved }) { edge in
+        })
+        let unresolved = sortedGroups(Dictionary(grouping: edges.filter { $0.status == .unresolved }) { edge in
             edge.sourceId
-        }
+        })
 
         return VaultIndex(
             vaultId: vaultURL.standardizedFileURL.path,
@@ -98,5 +100,15 @@ public struct VaultIndexer {
     private func sha256(_ string: String) -> String {
         let digest = SHA256.hash(data: Data(string.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func sortedGroups(_ groups: [String: [LinkEdge]]) -> [String: [LinkEdge]] {
+        groups.mapValues { edges in
+            edges.sorted { lhs, rhs in
+                if lhs.sourceId != rhs.sourceId { return lhs.sourceId < rhs.sourceId }
+                if lhs.href != rhs.href { return lhs.href < rhs.href }
+                return lhs.id < rhs.id
+            }
+        }
     }
 }
