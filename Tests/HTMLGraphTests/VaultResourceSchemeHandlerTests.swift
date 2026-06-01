@@ -57,6 +57,18 @@ final class VaultResourceSchemeHandlerTests: XCTestCase {
         XCTAssertEqual(requestURL?.absoluteString, "htmlgraph://vault/notes/My%20Page.html")
     }
 
+    func testFileURLIgnoresQueryAndFragment() {
+        let requestURL = URL(string: "htmlgraph://vault/notes/page.html?cache=false#section")!
+
+        let fileURL = VaultResourceSchemeHandler.fileURL(
+            for: requestURL,
+            vaultURL: vaultURL,
+            policy: policy
+        )
+
+        XCTAssertEqual(fileURL?.path, "/tmp/vault/notes/page.html")
+    }
+
     func testMimeTypesCoverKnownExtensionsAndFallback() {
         XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "index.html")), "text/html")
         XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "style.css")), "text/css")

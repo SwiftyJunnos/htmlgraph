@@ -2,6 +2,21 @@ import SwiftUI
 import HTMLGraphCore
 import WebKit
 
+enum WebResourcePolicy {
+    static let networkBlockURLFilter = "^(https?|wss?|ftp)://"
+
+    static let networkBlockRuleJSON = """
+    [{
+      "trigger": {
+        "url-filter": "\(networkBlockURLFilter)"
+      },
+      "action": {
+        "type": "block"
+      }
+    }]
+    """
+}
+
 struct HTMLDocumentWebView: NSViewRepresentable {
     let documentURL: URL
     let vaultURL: URL
@@ -112,20 +127,9 @@ struct HTMLDocumentWebView: NSViewRepresentable {
                 return
             }
 
-            let rules = """
-            [{
-              "trigger": {
-                "url-filter": "^https?://"
-              },
-              "action": {
-                "type": "block"
-              }
-            }]
-            """
-
             WKContentRuleListStore.default().compileContentRuleList(
                 forIdentifier: "HTMLGraphBlockNetwork",
-                encodedContentRuleList: rules
+                encodedContentRuleList: WebResourcePolicy.networkBlockRuleJSON
             ) { [weak self, weak webView] ruleList, error in
                 DispatchQueue.main.async {
                     guard let self else { return }
