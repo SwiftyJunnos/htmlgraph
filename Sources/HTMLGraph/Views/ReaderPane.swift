@@ -40,9 +40,29 @@ struct ReaderPane: View {
 
                 Divider()
 
-                Text("Selected file: \(document.absolutePath)")
-                    .foregroundStyle(.secondary)
+                if let vaultURL = appState.vaultURL {
+                    HTMLDocumentWebView(
+                        documentURL: URL(fileURLWithPath: document.absolutePath),
+                        vaultURL: vaultURL,
+                        onInternalNavigation: { relativePath in
+                            appState.selectDocument(relativePath)
+                        },
+                        onExternalNavigation: { url in
+                            let didOpen = NSWorkspace.shared.open(url)
+                            if !didOpen {
+                                appState.errorMessage = "Could not open \(url.absoluteString) in the default external app."
+                            }
+                        }
+                    )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ContentUnavailableView(
+                        "No vault selected",
+                        systemImage: "folder",
+                        description: Text("Choose a local HTML folder to render this document.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             } else {
                 ContentUnavailableView(
                     "Open a vault",
