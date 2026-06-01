@@ -44,6 +44,7 @@ struct ReaderPane: View {
                     HTMLDocumentWebView(
                         documentURL: URL(fileURLWithPath: document.absolutePath),
                         vaultURL: vaultURL,
+                        knownDocumentIds: Set(appState.index?.documents.map(\.id) ?? []),
                         onInternalNavigation: { relativePath in
                             appState.selectDocument(relativePath)
                         },
@@ -52,6 +53,9 @@ struct ReaderPane: View {
                             if !didOpen {
                                 appState.errorMessage = "Could not open \(url.absoluteString) in the default external app."
                             }
+                        },
+                        onNavigationError: { message in
+                            appState.errorMessage = message
                         }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

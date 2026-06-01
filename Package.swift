@@ -30,6 +30,10 @@ let package = Package(
         .testTarget(
             name: "HTMLGraphCoreTests",
             dependencies: ["HTMLGraphCore"]
+        ),
+        .testTarget(
+            name: "HTMLGraphTests",
+            dependencies: ["HTMLGraph"]
         )
     ]
 )
