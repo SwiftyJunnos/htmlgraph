@@ -1,6 +1,6 @@
 import Foundation
 
-public struct VaultIndex: Codable, Equatable {
+public struct VaultIndex: Codable, Equatable, Sendable {
     public let vaultId: String
     public let documents: [DocumentNode]
     public let edges: [LinkEdge]

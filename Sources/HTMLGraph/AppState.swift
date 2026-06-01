@@ -11,6 +11,10 @@ final class AppState: ObservableObject {
     @Published var trustMode: VaultTrustMode = .safe
     @Published var allowsNetworkAccess = false
     @Published var errorMessage: String?
+    @Published var isIndexing = false
+
+    private var indexingTask: Task<Void, Never>?
+    private var indexingGeneration = UUID()
 
     var selectedDocument: DocumentNode? {
         guard let selectedDocumentId else { return nil }
@@ -29,15 +33,61 @@ final class AppState: ObservableObject {
     }
 
     func openVault(_ url: URL) {
-        do {
-            let builtIndex = try VaultIndexer().indexVault(at: url)
-            vaultURL = url
+        indexingTask?.cancel()
+
+        let generation = UUID()
+        indexingGeneration = generation
+        vaultURL = url
+        index = nil
+        selectedDocumentId = nil
+        errorMessage = nil
+        isIndexing = true
+
+        indexingTask = Task { [weak self] in
+            do {
+                let builtIndex = try await Task.detached(priority: .userInitiated) {
+                    try Task.checkCancellation()
+                    let index = try VaultIndexer().indexVault(at: url)
+                    try Task.checkCancellation()
+                    return index
+                }.value
+
+                guard !Task.isCancelled else { return }
+                self?.finishIndexing(generation: generation, result: .success(builtIndex))
+            } catch is CancellationError {
+                self?.finishCancelledIndexing(generation: generation)
+            } catch {
+                self?.finishIndexing(generation: generation, result: .failure(error))
+            }
+        }
+    }
+
+    private func finishIndexing(generation: UUID, result: Result<VaultIndex, Error>) {
+        guard generation == indexingGeneration else { return }
+
+        isIndexing = false
+        indexingTask = nil
+
+        switch result {
+        case .success(let builtIndex):
             index = builtIndex
             selectedDocumentId = builtIndex.documents.first?.id
             errorMessage = nil
-        } catch {
+        case .failure(let error):
+            index = nil
+            selectedDocumentId = nil
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func finishCancelledIndexing(generation: UUID) {
+        guard generation == indexingGeneration else { return }
+        isIndexing = false
+        indexingTask = nil
+    }
+
+    deinit {
+        indexingTask?.cancel()
     }
 
     func selectDocument(_ id: String) {

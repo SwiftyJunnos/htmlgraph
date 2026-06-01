@@ -21,13 +21,7 @@ struct HTMLGraphApp: App {
     }
 
     private func chooseVault() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Open Vault"
-
-        if panel.runModal() == .OK, let url = panel.url {
+        if let url = VaultFolderPicker.chooseVault() {
             appState.openVault(url)
         }
     }

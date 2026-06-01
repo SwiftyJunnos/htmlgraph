@@ -1,6 +1,6 @@
 import Foundation
 
-public struct DocumentNode: Codable, Equatable, Identifiable, Hashable {
+public struct DocumentNode: Codable, Equatable, Identifiable, Hashable, Sendable {
     public let id: String
     public let path: String
     public let absolutePath: String

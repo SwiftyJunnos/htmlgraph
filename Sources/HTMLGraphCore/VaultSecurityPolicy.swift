@@ -1,11 +1,11 @@
 import Foundation
 
-public enum VaultTrustMode: String, Codable, Equatable {
+public enum VaultTrustMode: String, Codable, Equatable, Sendable {
     case safe
     case trusted
 }
 
-public struct VaultSecurityPolicy: Codable, Equatable {
+public struct VaultSecurityPolicy: Codable, Equatable, Sendable {
     public let mode: VaultTrustMode
     public let allowsNetworkAccess: Bool
 

@@ -5,7 +5,10 @@ struct ReaderPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let document = appState.selectedDocument {
+            if appState.isIndexing {
+                ProgressView("Indexing vault...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let document = appState.selectedDocument {
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(document.title)
@@ -27,7 +30,10 @@ struct ReaderPane: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6))
 
                     Button("Open External") {
-                        NSWorkspace.shared.open(URL(fileURLWithPath: document.absolutePath))
+                        let didOpen = NSWorkspace.shared.open(URL(fileURLWithPath: document.absolutePath))
+                        if !didOpen {
+                            appState.errorMessage = "Could not open \(document.path) in the default external app."
+                        }
                     }
                 }
                 .padding()

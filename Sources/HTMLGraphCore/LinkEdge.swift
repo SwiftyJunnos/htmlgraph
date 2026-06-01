@@ -1,13 +1,13 @@
 import Foundation
 
-public enum LinkStatus: String, Codable, Equatable, Hashable {
+public enum LinkStatus: String, Codable, Equatable, Hashable, Sendable {
     case resolved
     case unresolved
     case sameDocument
     case external
 }
 
-public struct RawHTMLLink: Equatable, Hashable {
+public struct RawHTMLLink: Equatable, Hashable, Sendable {
     public let href: String
     public let text: String
 
@@ -17,7 +17,7 @@ public struct RawHTMLLink: Equatable, Hashable {
     }
 }
 
-public struct LinkEdge: Codable, Equatable, Identifiable, Hashable {
+public struct LinkEdge: Codable, Equatable, Identifiable, Hashable, Sendable {
     public let id: String
     public let sourceId: String
     public let targetId: String?
