@@ -11,6 +11,9 @@ MVP scope:
 
 Development:
 
+Requirements:
+- Swift 6 / Xcode toolchain capable of `// swift-tools-version: 6.0`.
+
 ```bash
 swift test
 swift run HTMLGraph
