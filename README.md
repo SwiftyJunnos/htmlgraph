@@ -18,6 +18,10 @@ swift test
 swift run HTMLGraph
 ```
 
+## TestFlight
+
+HTMLGraph includes an Xcode project for macOS TestFlight distribution. See `docs/testflight.md` for signing, archive, and upload steps.
+
 ## Manual QA Fixture
 
 Open `Fixtures/sample-vault` from the app.
