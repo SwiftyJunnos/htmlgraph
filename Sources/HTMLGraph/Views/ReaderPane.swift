@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ReaderPane: View {
     @EnvironmentObject private var appState: AppState
+    @AppStorage("preferredEditorBundleID") private var preferredEditorBundleID = ""
     let onChooseVault: () -> Void
     let onAcceptInboxItem: (InboxItem) -> Void
 
@@ -49,12 +50,7 @@ struct ReaderPane: View {
                     .fixedSize()
                     .help("Add this item to your vault so it joins the graph. Click for the vault root, or use the menu to pick a folder.")
 
-                    Button("Open External") {
-                        let didOpen = NSWorkspace.shared.open(URL(fileURLWithPath: item.absolutePath))
-                        if !didOpen {
-                            appState.errorMessage = "Could not open \(item.path) in the default external app."
-                        }
-                    }
+                    openInEditorButton(absolutePath: item.absolutePath)
                 }
                 .padding()
 
@@ -103,12 +99,7 @@ struct ReaderPane: View {
 
                     Spacer()
 
-                    Button("Open External") {
-                        let didOpen = NSWorkspace.shared.open(URL(fileURLWithPath: document.absolutePath))
-                        if !didOpen {
-                            appState.errorMessage = "Could not open \(document.path) in the default external app."
-                        }
-                    }
+                    openInEditorButton(absolutePath: document.absolutePath)
                 }
                 .padding()
 
@@ -175,6 +166,41 @@ struct ReaderPane: View {
         }
     }
 
+    private func openInEditorButton(absolutePath: String) -> some View {
+        let editors = ExternalEditor.installedEditors()
+        let preferred = editors.first { $0.bundleID == preferredEditorBundleID } ?? editors.first
+
+        return Menu {
+            if editors.isEmpty {
+                Text("No supported editor found")
+            } else {
+                ForEach(editors) { editor in
+                    Button(editor.name) {
+                        preferredEditorBundleID = editor.bundleID
+                        openWith(editor, absolutePath: absolutePath)
+                    }
+                }
+            }
+        } label: {
+            Text("Open in Editor")
+        } primaryAction: {
+            if let preferred {
+                openWith(preferred, absolutePath: absolutePath)
+            } else {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: absolutePath)])
+            }
+        }
+        .menuStyle(.button)
+        .fixedSize()
+        .help("Open this file's HTML source in a code editor. Use the menu to choose which editor.")
+    }
+
+    private func openWith(_ editor: ExternalEditor.Editor, absolutePath: String) {
+        ExternalEditor.open(URL(fileURLWithPath: absolutePath), with: editor) { message in
+            appState.errorMessage = message
+        }
+    }
+
     private func webViewIdentity(for document: DocumentNode, vaultURL: URL) -> String {
         [
             vaultURL.standardizedFileURL.path,
@@ -192,5 +218,55 @@ struct ReaderPane: View {
             appState.trustMode.rawValue,
             String(appState.allowsNetworkAccess)
         ].joined(separator: "|")
+    }
+}
+
+/// Opens a file's source in a code editor rather than the default `.html` handler
+/// (which is usually a browser). The user picks which installed editor to use.
+enum ExternalEditor {
+    struct Editor: Identifiable, Hashable {
+        let bundleID: String
+        let name: String
+        let url: URL
+
+        var id: String { bundleID }
+    }
+
+    /// Known source editors, in display order. Only installed ones are surfaced.
+    private static let catalog: [(bundleID: String, name: String)] = [
+        ("com.microsoft.VSCode", "Visual Studio Code"),
+        ("com.todesktop.230313mzl4w4u92", "Cursor"),
+        ("dev.zed.Zed", "Zed"),
+        ("com.sublimetext.4", "Sublime Text"),
+        ("com.sublimetext.3", "Sublime Text 3"),
+        ("com.barebones.bbedit", "BBEdit"),
+        ("com.panic.Nova", "Nova"),
+        ("com.macromates.TextMate", "TextMate"),
+        ("com.apple.dt.Xcode", "Xcode"),
+        ("com.apple.TextEdit", "TextEdit")
+    ]
+
+    @MainActor
+    static func installedEditors() -> [Editor] {
+        let workspace = NSWorkspace.shared
+        return catalog.compactMap { entry in
+            guard let url = workspace.urlForApplication(withBundleIdentifier: entry.bundleID) else { return nil }
+            return Editor(bundleID: entry.bundleID, name: entry.name, url: url)
+        }
+    }
+
+    @MainActor
+    static func open(_ fileURL: URL, with editor: Editor, onError: @escaping (String) -> Void) {
+        Task { @MainActor in
+            do {
+                try await NSWorkspace.shared.open(
+                    [fileURL],
+                    withApplicationAt: editor.url,
+                    configuration: NSWorkspace.OpenConfiguration()
+                )
+            } catch {
+                onError("Could not open \(fileURL.lastPathComponent) in \(editor.name): \(error.localizedDescription)")
+            }
+        }
     }
 }
