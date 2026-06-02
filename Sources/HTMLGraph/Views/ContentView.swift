@@ -65,9 +65,7 @@ struct ContentView: View {
     }
 
     private func chooseVault() {
-        if let url = VaultFolderPicker.chooseVault() {
-            appState.openVault(url)
-        }
+        appState.chooseAndOpenVault()
     }
 
     private func acceptInboxItem(_ item: InboxItem) {

@@ -152,6 +152,10 @@ struct ReaderPane: View {
                         .controlSize(.large)
                         .accessibilityLabel("Open Vault")
                         .help("Choose a local HTML folder to open as a vault.")
+
+                        if !appState.recentVaults.isEmpty {
+                            recentVaultsList
+                        }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -164,6 +168,45 @@ struct ReaderPane: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var recentVaultsList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Recent")
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            ForEach(Array(appState.recentVaults.prefix(5))) { recent in
+                Button {
+                    appState.openRecent(recent)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "folder")
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(recent.displayName)
+                                .lineLimit(1)
+                            Text(recent.path)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button("Remove from Recent", role: .destructive) {
+                        appState.removeRecent(recent)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 360)
     }
 
     private func openInEditorButton(absolutePath: String) -> some View {

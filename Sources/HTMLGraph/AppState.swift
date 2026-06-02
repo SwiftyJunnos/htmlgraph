@@ -58,6 +58,43 @@ enum DocumentTreeBuilder {
     }
 }
 
+/// A vault the user has opened before. Stores a security-scoped bookmark (required
+/// to re-open a sandboxed user-selected folder across launches) plus a stable path
+/// used as identity, de-dup key, and the UI subtitle.
+struct RecentVault: Codable, Identifiable, Hashable {
+    let bookmarkData: Data
+    let displayName: String
+    let path: String
+    let lastOpened: Date
+
+    var id: String { path }
+}
+
+/// UserDefaults-backed persistence for the recent vaults list. Pure storage — the
+/// bookmark resolution + security-scoped access lifecycle lives in `AppState`.
+struct RecentVaultsStore {
+    static let maxCount = 10
+
+    private let defaults: UserDefaults
+    private let key = "recentVaults"
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func load() -> [RecentVault] {
+        guard let data = defaults.data(forKey: key) else { return [] }
+        return (try? JSONDecoder().decode([RecentVault].self, from: data)) ?? []
+    }
+
+    func save(_ vaults: [RecentVault]) {
+        let capped = Array(vaults.prefix(Self.maxCount))
+        if let data = try? JSONEncoder().encode(capped) {
+            defaults.set(data, forKey: key)
+        }
+    }
+}
+
 @MainActor
 final class AppState: ObservableObject {
     @Published var vaultURL: URL?
@@ -75,10 +112,20 @@ final class AppState: ObservableObject {
     @Published var errorMessage: String?
     @Published var isIndexing = false
     @Published var inboxItems: [InboxItem] = []
+    @Published private(set) var recentVaults: [RecentVault] = []
 
     private var indexingTask: Task<Void, Never>?
     private var inboxPollingTask: Task<Void, Never>?
     private var indexingGeneration = UUID()
+
+    /// The single folder we currently hold a security-scoped access claim on.
+    private var accessedVaultURL: URL?
+    private let recentsStore: RecentVaultsStore
+
+    init(recentsStore: RecentVaultsStore = RecentVaultsStore()) {
+        self.recentsStore = recentsStore
+        self.recentVaults = recentsStore.load()
+    }
 
     var selectedDocumentId: String? {
         if case let .document(id) = sidebarSelection { return id }
@@ -155,7 +202,76 @@ final class AppState: ObservableObject {
         DocumentTreeBuilder.build(from: index?.documents ?? [])
     }
 
+    /// Opens a folder the user just picked via the panel. Claims security-scoped
+    /// access, records a reopenable bookmark, then starts the session.
     func openVault(_ url: URL) {
+        beginAccess(url)
+        if let bookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
+            recordRecent(url: url, bookmarkData: bookmark)
+        }
+        beginSession(at: url)
+    }
+
+    /// Re-opens a previously recorded vault by resolving its security-scoped bookmark.
+    /// Drops the entry (and, unless automatic, surfaces an error) if it can't be opened.
+    func openRecent(_ recent: RecentVault, isAutomatic: Bool = false) {
+        var isStale = false
+        guard let resolved = try? URL(
+            resolvingBookmarkData: recent.bookmarkData,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else {
+            dropRecent(recent, automatic: isAutomatic)
+            return
+        }
+
+        if accessedVaultURL != resolved {
+            releaseAccess()
+            guard resolved.startAccessingSecurityScopedResource() else {
+                dropRecent(recent, automatic: isAutomatic)
+                return
+            }
+            accessedVaultURL = resolved
+        }
+
+        guard directoryExists(resolved) else {
+            releaseAccess()
+            dropRecent(recent, automatic: isAutomatic)
+            return
+        }
+
+        var bookmarkData = recent.bookmarkData
+        if isStale,
+           let refreshed = try? resolved.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
+            bookmarkData = refreshed
+        }
+
+        recordRecent(url: resolved, bookmarkData: bookmarkData)
+        beginSession(at: resolved)
+    }
+
+    /// Shows the folder picker and opens the chosen vault. Single entry point so the
+    /// AppKit panel + bookmark flow lives in one place.
+    func chooseAndOpenVault() {
+        if let url = VaultFolderPicker.chooseVault() {
+            openVault(url)
+        }
+    }
+
+    func removeRecent(_ recent: RecentVault) {
+        recentVaults.removeAll { $0.path == recent.path }
+        recentsStore.save(recentVaults)
+    }
+
+    func clearRecents() {
+        recentVaults = []
+        recentsStore.save([])
+    }
+
+    /// Shared work of opening a vault: cancel prior tasks, reset state, kick off
+    /// indexing + inbox polling. Access/bookmark handling happens in the callers.
+    private func beginSession(at url: URL) {
         indexingTask?.cancel()
         inboxPollingTask?.cancel()
 
@@ -194,6 +310,43 @@ final class AppState: ObservableObject {
         startInboxPolling()
     }
 
+    private func beginAccess(_ url: URL) {
+        guard accessedVaultURL != url else { return }
+        releaseAccess()
+        _ = url.startAccessingSecurityScopedResource()
+        accessedVaultURL = url
+    }
+
+    private func releaseAccess() {
+        accessedVaultURL?.stopAccessingSecurityScopedResource()
+        accessedVaultURL = nil
+    }
+
+    private func recordRecent(url: URL, bookmarkData: Data) {
+        let standardizedPath = url.standardizedFileURL.path
+        let name = url.lastPathComponent.isEmpty ? standardizedPath : url.lastPathComponent
+        let entry = RecentVault(bookmarkData: bookmarkData, displayName: name, path: standardizedPath, lastOpened: Date())
+        recentVaults.removeAll { $0.path.caseInsensitiveCompare(standardizedPath) == .orderedSame }
+        recentVaults.insert(entry, at: 0)
+        if recentVaults.count > RecentVaultsStore.maxCount {
+            recentVaults = Array(recentVaults.prefix(RecentVaultsStore.maxCount))
+        }
+        recentsStore.save(recentVaults)
+    }
+
+    private func dropRecent(_ recent: RecentVault, automatic: Bool) {
+        recentVaults.removeAll { $0.path == recent.path }
+        recentsStore.save(recentVaults)
+        if !automatic {
+            errorMessage = "“\(recent.displayName)” could not be opened — it may have been moved or deleted. It has been removed from Recent."
+        }
+    }
+
+    private func directoryExists(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
+    }
+
     private func finishIndexing(generation: UUID, result: Result<VaultIndex, Error>) {
         guard generation == indexingGeneration else { return }
 
@@ -224,6 +377,7 @@ final class AppState: ObservableObject {
     deinit {
         indexingTask?.cancel()
         inboxPollingTask?.cancel()
+        accessedVaultURL?.stopAccessingSecurityScopedResource()
     }
 
     func selectDocument(_ id: String) {
