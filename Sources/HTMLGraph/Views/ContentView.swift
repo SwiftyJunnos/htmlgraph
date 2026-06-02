@@ -8,17 +8,17 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             VaultSidebar()
-                .frame(minWidth: 240)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
         } content: {
             ReaderPane {
                 chooseVault()
             } onAcceptInboxItem: { item in
                 acceptInboxItem(item)
             }
-            .frame(minWidth: 520)
+            .navigationSplitViewColumnWidth(min: 480, ideal: 760)
         } detail: {
             ContextPane()
-                .frame(minWidth: 280)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 360)
         }
         .navigationTitle(appState.vaultDisplayName ?? "HTMLGraph")
         .navigationSubtitle(appState.vaultStatusText)
