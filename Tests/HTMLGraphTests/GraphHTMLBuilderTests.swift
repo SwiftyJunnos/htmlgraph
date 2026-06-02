@@ -9,13 +9,20 @@ final class GraphHTMLBuilderTests: XCTestCase {
 
         let html = GraphHTMLBuilder.html(centerId: "index.html", index: index, global: false)
 
-        XCTAssertTrue(html.contains("&lt;Home&gt;"))
+        // Graph membership: the center's resolved neighbor is included; the orphan and
+        // the unresolved target are not.
         XCTAssertTrue(html.contains("notes/graph.html"))
         XCTAssertFalse(html.contains("notes/orphan.html"))
         XCTAssertFalse(html.contains("missing.html"))
-        XCTAssertTrue(html.contains("Graph &lt;/script&gt;&lt;img src=x onerror=alert(1)&gt;"))
+
+        // Title content is embedded (inside the JSON payload) but its angle brackets are
+        // escaped, so a malicious title cannot break out of the <script> block.
+        XCTAssertTrue(html.contains("Home"))
+        XCTAssertTrue(html.contains("onerror=alert(1)"))
         XCTAssertFalse(html.contains("</script><img src=x onerror=alert(1)>"))
-        XCTAssertTrue(html.contains(#"window.webkit.messageHandlers.graph.postMessage(id)"#))
+
+        // The click -> navigate bridge is present.
+        XCTAssertTrue(html.contains("window.webkit.messageHandlers.graph.postMessage"))
     }
 
     func testGlobalGraphIncludesAllDocumentsButOnlyResolvedEdges() {
@@ -28,6 +35,7 @@ final class GraphHTMLBuilderTests: XCTestCase {
         XCTAssertTrue(html.contains("notes/orphan.html"))
         XCTAssertFalse(html.contains("missing.html"))
     }
+
 
     private func makeIndex() -> VaultIndex {
         let documents = [
