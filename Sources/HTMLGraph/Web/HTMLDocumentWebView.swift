@@ -3,18 +3,23 @@ import HTMLGraphCore
 import WebKit
 
 enum WebResourcePolicy {
-    static let networkBlockURLFilter = "^(https?|wss?|ftp)://"
+    /// WKContentRuleList's `url-filter` uses a restricted regex subset that does
+    /// NOT support alternation — `^(https?|wss?|ftp)://` fails to compile with
+    /// "Disjunctions are not supported yet", which aborts the whole page load.
+    /// Express each network scheme as its own rule using only the supported `?`
+    /// quantifier and `^` anchor.
+    static let networkBlockURLFilters = [
+        "^https?://",
+        "^wss?://",
+        "^ftp://"
+    ]
 
-    static let networkBlockRuleJSON = """
-    [{
-      "trigger": {
-        "url-filter": "\(networkBlockURLFilter)"
-      },
-      "action": {
-        "type": "block"
-      }
-    }]
-    """
+    static let networkBlockRuleJSON: String = {
+        let rules = networkBlockURLFilters
+            .map { #"{"trigger":{"url-filter":"\#($0)"},"action":{"type":"block"}}"# }
+            .joined(separator: ",")
+        return "[\(rules)]"
+    }()
 }
 
 struct HTMLDocumentWebView: NSViewRepresentable {
