@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ContextPane: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.openWindow) private var openWindow
     @State private var tab: ContextTab = .backlinks
 
     private enum ContextTab: String, CaseIterable, Identifiable {
@@ -157,6 +158,17 @@ struct ContextPane: View {
                     appState.selectDocument(id)
                 }
             )
+            .overlay(alignment: .bottomTrailing) {
+                Button {
+                    openWindow(id: "global-graph")
+                } label: {
+                    Label("Full Graph", systemImage: "point.3.connected.trianglepath.dotted")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .padding(10)
+                .help("Open the whole vault as a graph in a new window.")
+            }
         } else {
             noVaultState
         }

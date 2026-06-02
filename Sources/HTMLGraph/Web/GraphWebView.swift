@@ -137,7 +137,7 @@ enum GraphHTMLBuilder {
             nodes.forEach(n => { neighbors[n.id] = new Set(); });
             edges.forEach(e => { neighbors[e.s.id].add(e.t.id); neighbors[e.t.id].add(e.s.id); });
 
-            function radius(n) { return 6 + Math.min(11, n.degree * 1.7) + (n.isCenter ? 3 : 0); }
+            function radius(n) { return 4 + Math.min(6, n.degree * 0.9) + (n.isCenter ? 2 : 0); }
 
             let scale = 1, panX = 0, panY = 0, fitted = false, userMoved = false;
             const sx = n => n.x * scale + width / 2 + panX;
