@@ -13,14 +13,9 @@ struct VaultSidebar: View {
                             .tag(SidebarSelection.inbox(item.id))
                     }
                 } header: {
-                    HStack {
-                        Text("Unfiled")
-                        Spacer()
-                        Text("\(appState.inboxItems.count)")
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
+                    Text("Unfiled")
                 }
+                .badge(appState.inboxItems.count)
             }
 
             if !appState.filteredDocuments.isEmpty {
