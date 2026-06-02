@@ -31,6 +31,32 @@ final class AppState: ObservableObject {
         VaultSecurityPolicy(mode: trustMode, allowsNetworkAccess: allowsNetworkAccess)
     }
 
+    var openVaultButtonTitle: String {
+        vaultURL == nil ? "Open Vault" : "Change Vault"
+    }
+
+    var vaultDisplayName: String? {
+        guard let vaultURL else { return nil }
+        return vaultURL.lastPathComponent.isEmpty ? vaultURL.path : vaultURL.lastPathComponent
+    }
+
+    var vaultDisplayPath: String? {
+        vaultURL?.standardizedFileURL.path
+    }
+
+    var vaultStatusText: String {
+        if isIndexing {
+            return "Indexing vault..."
+        }
+
+        guard vaultURL != nil else {
+            return "No vault open"
+        }
+
+        let count = index?.documents.count ?? 0
+        return count == 1 ? "1 document" : "\(count) documents"
+    }
+
     var filteredDocuments: [DocumentNode] {
         let documents = index?.documents ?? []
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)

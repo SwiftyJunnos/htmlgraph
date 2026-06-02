@@ -76,12 +76,21 @@ struct ReaderPane: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
-                ContentUnavailableView(
-                    "Open a vault",
-                    systemImage: "folder",
-                    description: Text("Choose a local HTML folder to begin.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if appState.vaultURL == nil {
+                    ContentUnavailableView(
+                        "Open a vault",
+                        systemImage: "folder",
+                        description: Text("Choose a local HTML folder to begin.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ContentUnavailableView(
+                        "No HTML documents",
+                        systemImage: "doc.text.magnifyingglass",
+                        description: Text("This vault has no indexed HTML files.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
     }
