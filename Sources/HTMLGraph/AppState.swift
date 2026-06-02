@@ -2,11 +2,19 @@ import Foundation
 import HTMLGraphCore
 import SwiftUI
 
+/// A single selection across the sidebar so Inbox and Documents share one
+/// `List` selection. Stored as one source of truth to avoid a side-effecting
+/// selection binding mutating `@Published` state during a view update.
+enum SidebarSelection: Hashable {
+    case inbox(String)
+    case document(String)
+}
+
 @MainActor
 final class AppState: ObservableObject {
     @Published var vaultURL: URL?
     @Published var index: VaultIndex?
-    @Published var selectedDocumentId: String?
+    @Published var sidebarSelection: SidebarSelection?
     @Published var searchText = ""
     @Published var trustMode: VaultTrustMode = .safe {
         didSet {
@@ -19,11 +27,20 @@ final class AppState: ObservableObject {
     @Published var errorMessage: String?
     @Published var isIndexing = false
     @Published var inboxItems: [InboxItem] = []
-    @Published var selectedInboxItemId: String?
 
     private var indexingTask: Task<Void, Never>?
     private var inboxPollingTask: Task<Void, Never>?
     private var indexingGeneration = UUID()
+
+    var selectedDocumentId: String? {
+        if case let .document(id) = sidebarSelection { return id }
+        return nil
+    }
+
+    var selectedInboxItemId: String? {
+        if case let .inbox(id) = sidebarSelection { return id }
+        return nil
+    }
 
     var selectedDocument: DocumentNode? {
         guard let selectedDocumentId else { return nil }
@@ -84,8 +101,7 @@ final class AppState: ObservableObject {
         indexingGeneration = generation
         vaultURL = url
         index = nil
-        selectedDocumentId = nil
-        selectedInboxItemId = nil
+        sidebarSelection = nil
         errorMessage = nil
         isIndexing = true
         do {
@@ -125,14 +141,14 @@ final class AppState: ObservableObject {
         switch result {
         case .success(let builtIndex):
             index = builtIndex
-            selectedDocumentId = builtIndex.documents.first?.id
+            sidebarSelection = builtIndex.documents.first.map { .document($0.id) }
             if let vaultURL {
                 inboxItems = (try? InboxScanner().scanInbox(at: vaultURL)) ?? inboxItems
             }
             errorMessage = nil
         case .failure(let error):
             index = nil
-            selectedDocumentId = nil
+            sidebarSelection = nil
             errorMessage = error.localizedDescription
         }
     }
@@ -149,26 +165,24 @@ final class AppState: ObservableObject {
     }
 
     func selectDocument(_ id: String) {
-        selectedDocumentId = id
-        selectedInboxItemId = nil
+        sidebarSelection = .document(id)
     }
 
     func selectInboxItem(_ id: String) {
-        selectedInboxItemId = id
-        selectedDocumentId = nil
+        sidebarSelection = .inbox(id)
     }
 
     func refreshInbox() throws {
         guard let vaultURL else {
             inboxItems = []
-            selectedInboxItemId = nil
+            if case .inbox = sidebarSelection { sidebarSelection = nil }
             return
         }
 
         inboxItems = try InboxScanner().scanInbox(at: vaultURL)
-        if let selectedInboxItemId,
-           !inboxItems.contains(where: { $0.id == selectedInboxItemId }) {
-            self.selectedInboxItemId = nil
+        if case let .inbox(id) = sidebarSelection,
+           !inboxItems.contains(where: { $0.id == id }) {
+            sidebarSelection = nil
         }
     }
 
@@ -177,7 +191,7 @@ final class AppState: ObservableObject {
 
         try InboxAccepter().accept(item, to: destinationURL, vaultURL: vaultURL)
         try refreshInbox()
-        selectedInboxItemId = nil
+        sidebarSelection = nil
         openVault(vaultURL)
     }
 
