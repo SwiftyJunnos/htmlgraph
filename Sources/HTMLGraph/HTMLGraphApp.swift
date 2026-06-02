@@ -11,6 +11,7 @@ struct HTMLGraphApp: App {
                 .environmentObject(appState)
                 .frame(minWidth: 1100, minHeight: 720)
         }
+        .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Open Vault...") {

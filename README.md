@@ -11,6 +11,23 @@ HTMLGraph is a macOS-first desktop viewer for local HTML knowledge vaults.
 - Show local and global graph views.
 - Keep the source vault read-only.
 
+## AI Inbox
+
+External AI tools can hand new knowledge to HTMLGraph by writing `.html` or `.htm`
+files under an `Inbox/` folder at the vault root:
+
+```text
+MyVault/
+  Inbox/
+    generated-note.html
+```
+
+Inbox documents are previewed separately and are not included in the main graph
+until accepted. Accepting an inbox item asks for a destination path inside the
+vault, moves the file there, and reindexes the vault. HTMLGraph refuses to accept
+items outside `Inbox/`, overwrite existing files, write outside the vault, or
+save accepted items back into `Inbox/`.
+
 ## Development
 
 ```bash

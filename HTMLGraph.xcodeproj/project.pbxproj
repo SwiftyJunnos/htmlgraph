@@ -15,10 +15,14 @@
 		010000000000000000000106 /* VaultIndexCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000006 /* VaultIndexCache.swift */; };
 		010000000000000000000107 /* VaultIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000007 /* VaultIndexer.swift */; };
 		010000000000000000000108 /* VaultSecurityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000008 /* VaultSecurityPolicy.swift */; };
+		01000000000000000000010A /* InboxAccepter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000A /* InboxAccepter.swift */; };
+		01000000000000000000010B /* InboxItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000B /* InboxItem.swift */; };
+		01000000000000000000010C /* InboxScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000C /* InboxScanner.swift */; };
 		010000000000000000000109 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = 010000000000000000000601 /* SwiftSoup */; };
 		010000000000000000000201 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000011 /* AppState.swift */; };
 		010000000000000000000202 /* HTMLGraphApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000012 /* HTMLGraphApp.swift */; };
 		010000000000000000000203 /* VaultFolderPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000013 /* VaultFolderPicker.swift */; };
+		01000000000000000000020D /* InboxDestinationPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000001D /* InboxDestinationPicker.swift */; };
 		010000000000000000000204 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000014 /* ContentView.swift */; };
 		010000000000000000000205 /* ContextPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000015 /* ContextPane.swift */; };
 		010000000000000000000206 /* GlobalGraphView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000016 /* GlobalGraphView.swift */; };
@@ -66,9 +70,13 @@
 		010000000000000000000006 /* VaultIndexCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultIndexCache.swift; sourceTree = "<group>"; };
 		010000000000000000000007 /* VaultIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultIndexer.swift; sourceTree = "<group>"; };
 		010000000000000000000008 /* VaultSecurityPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultSecurityPolicy.swift; sourceTree = "<group>"; };
+		01000000000000000000000A /* InboxAccepter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxAccepter.swift; sourceTree = "<group>"; };
+		01000000000000000000000B /* InboxItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxItem.swift; sourceTree = "<group>"; };
+		01000000000000000000000C /* InboxScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxScanner.swift; sourceTree = "<group>"; };
 		010000000000000000000011 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		010000000000000000000012 /* HTMLGraphApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTMLGraphApp.swift; sourceTree = "<group>"; };
 		010000000000000000000013 /* VaultFolderPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultFolderPicker.swift; sourceTree = "<group>"; };
+		01000000000000000000001D /* InboxDestinationPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxDestinationPicker.swift; sourceTree = "<group>"; };
 		010000000000000000000014 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		010000000000000000000015 /* ContextPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextPane.swift; sourceTree = "<group>"; };
 		010000000000000000000016 /* GlobalGraphView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalGraphView.swift; sourceTree = "<group>"; };
@@ -133,6 +141,9 @@
 			children = (
 				010000000000000000000001 /* DocumentNode.swift */,
 				010000000000000000000002 /* HTMLMetadataExtractor.swift */,
+				01000000000000000000000A /* InboxAccepter.swift */,
+				01000000000000000000000B /* InboxItem.swift */,
+				01000000000000000000000C /* InboxScanner.swift */,
 				010000000000000000000003 /* LinkEdge.swift */,
 				010000000000000000000004 /* LinkNormalizer.swift */,
 				010000000000000000000005 /* VaultIndex.swift */,
@@ -148,6 +159,7 @@
 			children = (
 				010000000000000000000011 /* AppState.swift */,
 				010000000000000000000012 /* HTMLGraphApp.swift */,
+				01000000000000000000001D /* InboxDestinationPicker.swift */,
 				010000000000000000000013 /* VaultFolderPicker.swift */,
 				010000000000000000000808 /* Views */,
 				010000000000000000000809 /* Web */,
@@ -305,6 +317,7 @@
 			files = (
 				010000000000000000000201 /* AppState.swift in Sources */,
 				010000000000000000000202 /* HTMLGraphApp.swift in Sources */,
+				01000000000000000000020D /* InboxDestinationPicker.swift in Sources */,
 				010000000000000000000203 /* VaultFolderPicker.swift in Sources */,
 				010000000000000000000204 /* ContentView.swift in Sources */,
 				010000000000000000000205 /* ContextPane.swift in Sources */,
@@ -324,6 +337,9 @@
 			files = (
 				010000000000000000000101 /* DocumentNode.swift in Sources */,
 				010000000000000000000102 /* HTMLMetadataExtractor.swift in Sources */,
+				01000000000000000000010A /* InboxAccepter.swift in Sources */,
+				01000000000000000000010B /* InboxItem.swift in Sources */,
+				01000000000000000000010C /* InboxScanner.swift in Sources */,
 				010000000000000000000103 /* LinkEdge.swift in Sources */,
 				010000000000000000000104 /* LinkNormalizer.swift in Sources */,
 				010000000000000000000105 /* VaultIndex.swift in Sources */,

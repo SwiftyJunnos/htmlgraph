@@ -4,12 +4,72 @@ import SwiftUI
 struct ReaderPane: View {
     @EnvironmentObject private var appState: AppState
     let onChooseVault: () -> Void
+    let onAcceptInboxItem: (InboxItem) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if appState.isIndexing {
                 ProgressView("Indexing vault...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let item = appState.selectedInboxItem {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.title)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text(item.path)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+
+                    Button("Accept") {
+                        onAcceptInboxItem(item)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Open External") {
+                        let didOpen = NSWorkspace.shared.open(URL(fileURLWithPath: item.absolutePath))
+                        if !didOpen {
+                            appState.errorMessage = "Could not open \(item.path) in the default external app."
+                        }
+                    }
+                }
+                .padding()
+
+                Divider()
+
+                if let vaultURL = appState.vaultURL {
+                    HTMLDocumentWebView(
+                        documentURL: URL(fileURLWithPath: item.absolutePath),
+                        vaultURL: vaultURL,
+                        policy: appState.securityPolicy,
+                        knownDocumentIds: Set(appState.index?.documents.map(\.id) ?? []),
+                        onInternalNavigation: { relativePath in
+                            appState.selectDocument(relativePath)
+                        },
+                        onExternalNavigation: { url in
+                            let didOpen = NSWorkspace.shared.open(url)
+                            if !didOpen {
+                                appState.errorMessage = "Could not open \(url.absoluteString) in the default external app."
+                            }
+                        },
+                        onNavigationError: { message in
+                            appState.errorMessage = message
+                        }
+                    )
+                    .id(inboxWebViewIdentity(for: item, vaultURL: vaultURL))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ContentUnavailableView(
+                        "No vault selected",
+                        systemImage: "folder",
+                        description: Text("Choose a local HTML folder to preview this inbox item.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             } else if let document = appState.selectedDocument {
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -112,6 +172,16 @@ struct ReaderPane: View {
         [
             vaultURL.standardizedFileURL.path,
             document.id,
+            appState.trustMode.rawValue,
+            String(appState.allowsNetworkAccess)
+        ].joined(separator: "|")
+    }
+
+    private func inboxWebViewIdentity(for item: InboxItem, vaultURL: URL) -> String {
+        [
+            vaultURL.standardizedFileURL.path,
+            item.id,
+            item.contentHash,
             appState.trustMode.rawValue,
             String(appState.allowsNetworkAccess)
         ].joined(separator: "|")

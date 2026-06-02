@@ -1,30 +1,39 @@
+import HTMLGraphCore
 import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var appState: AppState
 
     var body: some View {
-        VStack(spacing: 0) {
-            VaultStatusBar {
+        NavigationSplitView {
+            VaultSidebar()
+                .frame(minWidth: 240)
+        } content: {
+            ReaderPane {
                 chooseVault()
+            } onAcceptInboxItem: { item in
+                acceptInboxItem(item)
             }
-
-            Divider()
-
-            NavigationSplitView {
-                VaultSidebar()
-                    .frame(minWidth: 240)
-            } content: {
-                ReaderPane {
-                    chooseVault()
+            .frame(minWidth: 520)
+        } detail: {
+            ContextPane()
+                .frame(minWidth: 280)
+        }
+        .navigationTitle(appState.vaultDisplayName ?? "HTMLGraph")
+        .navigationSubtitle(appState.vaultStatusText)
+        .searchable(text: $appState.searchText, placement: .sidebar, prompt: "Search documents")
+        .toolbar {
+            if appState.vaultURL != nil {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        chooseVault()
+                    } label: {
+                        Label(appState.openVaultButtonTitle, systemImage: "folder")
+                    }
+                    .help("Choose a different local HTML folder to open as a vault.")
                 }
-                    .frame(minWidth: 520)
-            } detail: {
-                ContextPane()
-                    .frame(minWidth: 280)
             }
         }
-        .safeAreaPadding(.top)
         .alert("HTMLGraph Error", isPresented: Binding(
             get: { appState.errorMessage != nil },
             set: { isPresented in
@@ -44,51 +53,17 @@ struct ContentView: View {
             appState.openVault(url)
         }
     }
-}
 
-private struct VaultStatusBar: View {
-    @EnvironmentObject private var appState: AppState
-    let onChooseVault: () -> Void
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: appState.vaultURL == nil ? "folder" : "folder.fill")
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
-                    Text(appState.vaultDisplayName ?? "No vault open")
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-
-                    Text(appState.vaultStatusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.quaternary, in: Capsule())
-                }
-
-                if let path = appState.vaultDisplayPath {
-                    Text(path)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-
-            Spacer(minLength: 12)
-
-            Button(appState.openVaultButtonTitle) {
-                onChooseVault()
-            }
-            .controlSize(.small)
+    private func acceptInboxItem(_ item: InboxItem) {
+        guard let vaultURL = appState.vaultURL,
+              let destinationURL = InboxDestinationPicker.chooseDestination(for: item, vaultURL: vaultURL) else {
+            return
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.bar)
+
+        do {
+            try appState.acceptInboxItem(item, to: destinationURL)
+        } catch {
+            appState.errorMessage = error.localizedDescription
+        }
     }
 }

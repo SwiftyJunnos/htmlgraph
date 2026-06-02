@@ -15,4 +15,7 @@ Use `Fixtures/sample-vault`.
 - [ ] Safe mode is selected by default.
 - [ ] Trusted mode can be selected per vault.
 - [ ] Source vault remains unchanged after browsing.
+- [ ] Creating `Inbox/generated-note.html` while the vault is open shows it in the Inbox section.
+- [ ] Selecting an Inbox item previews it without adding it to the main document list.
+- [ ] Accepting an Inbox item moves it to the chosen vault path and reindexes it into the main document list.
 - [ ] `swift test` passes.

@@ -18,13 +18,21 @@ final class AppState: ObservableObject {
     @Published var allowsNetworkAccess = false
     @Published var errorMessage: String?
     @Published var isIndexing = false
+    @Published var inboxItems: [InboxItem] = []
+    @Published var selectedInboxItemId: String?
 
     private var indexingTask: Task<Void, Never>?
+    private var inboxPollingTask: Task<Void, Never>?
     private var indexingGeneration = UUID()
 
     var selectedDocument: DocumentNode? {
         guard let selectedDocumentId else { return nil }
         return index?.document(id: selectedDocumentId)
+    }
+
+    var selectedInboxItem: InboxItem? {
+        guard let selectedInboxItemId else { return nil }
+        return inboxItems.first { $0.id == selectedInboxItemId }
     }
 
     var securityPolicy: VaultSecurityPolicy {
@@ -70,14 +78,22 @@ final class AppState: ObservableObject {
 
     func openVault(_ url: URL) {
         indexingTask?.cancel()
+        inboxPollingTask?.cancel()
 
         let generation = UUID()
         indexingGeneration = generation
         vaultURL = url
         index = nil
         selectedDocumentId = nil
+        selectedInboxItemId = nil
         errorMessage = nil
         isIndexing = true
+        do {
+            try refreshInbox()
+        } catch {
+            inboxItems = []
+            errorMessage = error.localizedDescription
+        }
 
         indexingTask = Task { [weak self] in
             do {
@@ -96,6 +112,8 @@ final class AppState: ObservableObject {
                 self?.finishIndexing(generation: generation, result: .failure(error))
             }
         }
+
+        startInboxPolling()
     }
 
     private func finishIndexing(generation: UUID, result: Result<VaultIndex, Error>) {
@@ -108,6 +126,9 @@ final class AppState: ObservableObject {
         case .success(let builtIndex):
             index = builtIndex
             selectedDocumentId = builtIndex.documents.first?.id
+            if let vaultURL {
+                inboxItems = (try? InboxScanner().scanInbox(at: vaultURL)) ?? inboxItems
+            }
             errorMessage = nil
         case .failure(let error):
             index = nil
@@ -124,9 +145,55 @@ final class AppState: ObservableObject {
 
     deinit {
         indexingTask?.cancel()
+        inboxPollingTask?.cancel()
     }
 
     func selectDocument(_ id: String) {
         selectedDocumentId = id
+        selectedInboxItemId = nil
+    }
+
+    func selectInboxItem(_ id: String) {
+        selectedInboxItemId = id
+        selectedDocumentId = nil
+    }
+
+    func refreshInbox() throws {
+        guard let vaultURL else {
+            inboxItems = []
+            selectedInboxItemId = nil
+            return
+        }
+
+        inboxItems = try InboxScanner().scanInbox(at: vaultURL)
+        if let selectedInboxItemId,
+           !inboxItems.contains(where: { $0.id == selectedInboxItemId }) {
+            self.selectedInboxItemId = nil
+        }
+    }
+
+    func acceptInboxItem(_ item: InboxItem, to destinationURL: URL) throws {
+        guard let vaultURL else { return }
+
+        try InboxAccepter().accept(item, to: destinationURL, vaultURL: vaultURL)
+        try refreshInbox()
+        selectedInboxItemId = nil
+        openVault(vaultURL)
+    }
+
+    private func startInboxPolling() {
+        inboxPollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 2_000_000_000)
+                    guard !Task.isCancelled else { return }
+                    try self?.refreshInbox()
+                } catch is CancellationError {
+                    return
+                } catch {
+                    self?.errorMessage = error.localizedDescription
+                }
+            }
+        }
     }
 }

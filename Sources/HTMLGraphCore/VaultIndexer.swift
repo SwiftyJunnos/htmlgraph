@@ -86,8 +86,15 @@ public struct VaultIndexer {
             let values = try url.resourceValues(forKeys: keys)
             guard values.isRegularFile == true else { return nil }
             let ext = url.pathExtension.lowercased()
-            return (ext == "html" || ext == "htm") ? url : nil
+            guard ext == "html" || ext == "htm" else { return nil }
+            let relative = relativePath(for: url, in: vaultURL)
+            return isInboxPath(relative) ? nil : url
         }
+    }
+
+    private func isInboxPath(_ relativePath: String) -> Bool {
+        relativePath == InboxScanner.inboxDirectoryName ||
+            relativePath.hasPrefix("\(InboxScanner.inboxDirectoryName)/")
     }
 
     private func relativePath(for fileURL: URL, in vaultURL: URL) -> String {

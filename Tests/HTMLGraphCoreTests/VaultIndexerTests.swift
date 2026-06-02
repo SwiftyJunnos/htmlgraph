@@ -130,6 +130,30 @@ final class VaultIndexerTests: XCTestCase {
         XCTAssertEqual(nestedDocument.status, .resolved)
     }
 
+    func testIndexerExcludesPendingInboxDocumentsFromMainGraph() throws {
+        let vaultURL = try makeTemporaryVault(files: [
+            "index.html": """
+            <!doctype html>
+            <html><head><title>Home</title></head><body>
+              <a href="./Inbox/draft.html">Draft</a>
+            </body></html>
+            """,
+            "Inbox/draft.html": """
+            <!doctype html>
+            <html><head><title>Draft</title></head><body></body></html>
+            """
+        ])
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        let index = try VaultIndexer().indexVault(at: vaultURL)
+
+        XCTAssertEqual(index.documents.map(\.id), ["index.html"])
+        XCTAssertNil(index.document(id: "Inbox/draft.html"))
+        XCTAssertTrue(index.unresolvedLinks["index.html"]?.contains { edge in
+            edge.href == "./Inbox/draft.html"
+        } ?? false)
+    }
+
     private func makeTemporaryVault(files: [String: String]) throws -> URL {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("HTMLGraphTests-\(UUID().uuidString)", isDirectory: true)
