@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ReaderPane: View {
     @EnvironmentObject private var appState: AppState
+    let onChooseVault: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -77,11 +78,23 @@ struct ReaderPane: View {
                 }
             } else {
                 if appState.vaultURL == nil {
-                    ContentUnavailableView(
-                        "Open a vault",
-                        systemImage: "folder",
-                        description: Text("Choose a local HTML folder to begin.")
-                    )
+                    VStack(spacing: 16) {
+                        ContentUnavailableView(
+                            "Open a vault",
+                            systemImage: "folder",
+                            description: Text("Choose a local HTML folder to begin.")
+                        )
+
+                        Button {
+                            onChooseVault()
+                        } label: {
+                            Label("Open Vault", systemImage: "folder")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .accessibilityLabel("Open Vault")
+                        .help("Choose a local HTML folder to open as a vault.")
+                    }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ContentUnavailableView(

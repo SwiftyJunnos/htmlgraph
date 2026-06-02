@@ -5,7 +5,9 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VaultStatusBar()
+            VaultStatusBar {
+                chooseVault()
+            }
 
             Divider()
 
@@ -13,18 +15,16 @@ struct ContentView: View {
                 VaultSidebar()
                     .frame(minWidth: 240)
             } content: {
-                ReaderPane()
+                ReaderPane {
+                    chooseVault()
+                }
                     .frame(minWidth: 520)
             } detail: {
                 ContextPane()
                     .frame(minWidth: 280)
             }
         }
-        .toolbar {
-            Button(appState.openVaultButtonTitle) {
-                chooseVault()
-            }
-        }
+        .safeAreaPadding(.top)
         .alert("HTMLGraph Error", isPresented: Binding(
             get: { appState.errorMessage != nil },
             set: { isPresented in
@@ -48,6 +48,7 @@ struct ContentView: View {
 
 private struct VaultStatusBar: View {
     @EnvironmentObject private var appState: AppState
+    let onChooseVault: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -79,6 +80,11 @@ private struct VaultStatusBar: View {
             }
 
             Spacer(minLength: 12)
+
+            Button(appState.openVaultButtonTitle) {
+                onChooseVault()
+            }
+            .controlSize(.small)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
