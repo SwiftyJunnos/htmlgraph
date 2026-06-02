@@ -54,16 +54,36 @@ struct ContextPane: View {
             )
         } else {
             List(backlinks) { edge in
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(edge.sourceId)
-                        .lineLimit(1)
-                    Text(edge.linkText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                Button {
+                    appState.selectDocument(edge.sourceId)
+                } label: {
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(documentTitle(for: edge.sourceId))
+                                .lineLimit(1)
+                            if !edge.linkText.isEmpty {
+                                Text(edge.linkText)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .help("Go to “\(documentTitle(for: edge.sourceId))”")
             }
         }
+    }
+
+    private func documentTitle(for id: String) -> String {
+        appState.index?.document(id: id)?.title ?? id
     }
 
     @ViewBuilder
