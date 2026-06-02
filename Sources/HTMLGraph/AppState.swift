@@ -93,6 +93,15 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Distinct relative folder paths that already contain documents (root excluded),
+    /// used to offer in-app "Add to Vault" destinations without a filesystem navigator.
+    var vaultFolders: [String] {
+        let folders = (index?.documents ?? []).map { document in
+            (document.path as NSString).deletingLastPathComponent
+        }
+        return Set(folders).subtracting([""]).sorted()
+    }
+
     func openVault(_ url: URL) {
         indexingTask?.cancel()
         inboxPollingTask?.cancel()
@@ -193,6 +202,43 @@ final class AppState: ObservableObject {
         try refreshInbox()
         sidebarSelection = nil
         openVault(vaultURL)
+    }
+
+    /// Promotes an unfiled item into the vault — to the root by default, or into a
+    /// known folder. The folder is purely organizational: the graph is flat, so every
+    /// destination yields the same node. Resolves name collisions so the one-click
+    /// path never dead-ends.
+    func addToVault(_ item: InboxItem, folder: String?) {
+        guard let vaultURL else { return }
+
+        let folderURL: URL
+        if let folder, !folder.isEmpty {
+            folderURL = vaultURL.appendingPathComponent(folder, isDirectory: true)
+        } else {
+            folderURL = vaultURL
+        }
+
+        let filename = (item.path as NSString).lastPathComponent
+        let destinationURL = uniqueDestination(in: folderURL, filename: filename)
+
+        do {
+            try acceptInboxItem(item, to: destinationURL)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func uniqueDestination(in folderURL: URL, filename: String) -> URL {
+        let base = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        var candidate = folderURL.appendingPathComponent(filename)
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: candidate.standardizedFileURL.path) {
+            let name = ext.isEmpty ? "\(base) \(suffix)" : "\(base) \(suffix).\(ext)"
+            candidate = folderURL.appendingPathComponent(name)
+            suffix += 1
+        }
+        return candidate
     }
 
     private func startInboxPolling() {

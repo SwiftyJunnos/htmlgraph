@@ -99,6 +99,39 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertTrue(appState.isIndexing || appState.index?.document(id: "Notes/idea.html") != nil)
     }
 
+    func testAddToVaultFilesItemToRootAndRemovesItFromInbox() throws {
+        let vaultURL = try makeTemporaryVault(files: [
+            "Inbox/draft.html": "<html><head><title>Draft</title></head><body></body></html>"
+        ])
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+        let appState = AppState()
+        appState.vaultURL = vaultURL
+        try appState.refreshInbox()
+        let item = try XCTUnwrap(appState.inboxItems.first)
+
+        appState.addToVault(item, folder: nil)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: vaultURL.appendingPathComponent("draft.html").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: vaultURL.appendingPathComponent("Inbox/draft.html").path))
+        XCTAssertEqual(appState.inboxItems, [])
+        XCTAssertNil(appState.errorMessage)
+    }
+
+    func testVaultFoldersListsDistinctDocumentFoldersExcludingRoot() throws {
+        let html = "<html><head><title>T</title></head><body></body></html>"
+        let vaultURL = try makeTemporaryVault(files: [
+            "index.html": html,
+            "concepts/a.html": html,
+            "concepts/b.html": html,
+            "guides/g.html": html
+        ])
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+        let appState = AppState()
+        appState.index = try VaultIndexer().indexVault(at: vaultURL)
+
+        XCTAssertEqual(appState.vaultFolders, ["concepts", "guides"])
+    }
+
     private func makeTemporaryVault(files: [String: String]) throws -> URL {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("HTMLGraphAppStateTests-\(UUID().uuidString)", isDirectory: true)

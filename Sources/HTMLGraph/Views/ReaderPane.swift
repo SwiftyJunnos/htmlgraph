@@ -17,7 +17,7 @@ struct ReaderPane: View {
                         Text(item.title)
                             .font(.headline)
                             .lineLimit(1)
-                        Text(item.path)
+                        Text("Unfiled · not in your graph yet — add it to include it.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -25,10 +25,29 @@ struct ReaderPane: View {
 
                     Spacer()
 
-                    Button("Accept") {
-                        onAcceptInboxItem(item)
+                    Menu("Add to Vault") {
+                        Button("Vault Root") {
+                            appState.addToVault(item, folder: nil)
+                        }
+                        if !appState.vaultFolders.isEmpty {
+                            Divider()
+                            ForEach(appState.vaultFolders, id: \.self) { folder in
+                                Button(folder) {
+                                    appState.addToVault(item, folder: folder)
+                                }
+                            }
+                        }
+                        Divider()
+                        Button("Choose Folder…") {
+                            onAcceptInboxItem(item)
+                        }
+                    } primaryAction: {
+                        appState.addToVault(item, folder: nil)
                     }
+                    .menuStyle(.button)
                     .buttonStyle(.borderedProminent)
+                    .fixedSize()
+                    .help("Add this item to your vault so it joins the graph. Click for the vault root, or use the menu to pick a folder.")
 
                     Button("Open External") {
                         let didOpen = NSWorkspace.shared.open(URL(fileURLWithPath: item.absolutePath))
