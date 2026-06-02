@@ -128,7 +128,7 @@ enum GraphHTMLBuilder {
             const nodes = DATA.nodes.map((n, i) => {
               const a = (i / Math.max(1, DATA.nodes.length)) * Math.PI * 2;
               return { id: n.id, title: n.title, degree: n.degree, isCenter: n.isCenter,
-                x: Math.cos(a) * 100, y: Math.sin(a) * 100, vx: 0, vy: 0, fixed: false };
+                x: n.isCenter ? 0 : Math.cos(a) * 100, y: n.isCenter ? 0 : Math.sin(a) * 100, vx: 0, vy: 0, fixed: false };
             });
             const byId = {};
             nodes.forEach(n => { byId[n.id] = n; });
@@ -167,9 +167,9 @@ enum GraphHTMLBuilder {
                 e.s.vx += fx; e.s.vy += fy; e.t.vx -= fx; e.t.vy -= fy;
               });
               nodes.forEach(n => {
-                if (n.isCenter) { n.x = 0; n.y = 0; n.vx = 0; n.vy = 0; return; }
-                n.vx += -n.x * pull; n.vy += -n.y * pull;
                 if (n.fixed) { n.vx = 0; n.vy = 0; return; }
+                const k = n.isCenter ? pull * 3 : pull;
+                n.vx += -n.x * k; n.vy += -n.y * k;
                 n.vx *= 0.86; n.vy *= 0.86;
                 n.x += n.vx * alpha; n.y += n.vy * alpha;
               });
