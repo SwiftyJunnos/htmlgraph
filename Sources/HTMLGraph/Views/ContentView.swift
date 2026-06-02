@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var showsSecurityPopover = false
 
     var body: some View {
         NavigationSplitView {
@@ -24,6 +25,21 @@ struct ContentView: View {
         .searchable(text: $appState.searchText, placement: .sidebar, prompt: "Search documents")
         .toolbar {
             if appState.vaultURL != nil {
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        showsSecurityPopover = true
+                    } label: {
+                        Label(
+                            appState.trustMode == .trusted ? "Trusted" : "Safe",
+                            systemImage: appState.trustMode == .trusted ? "lock.shield.fill" : "lock.shield"
+                        )
+                    }
+                    .help("Document rendering security — JavaScript and network access.")
+                    .popover(isPresented: $showsSecurityPopover, arrowEdge: .bottom) {
+                        SecuritySettingsView()
+                    }
+                }
+
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         chooseVault()
@@ -65,5 +81,43 @@ struct ContentView: View {
         } catch {
             appState.errorMessage = error.localizedDescription
         }
+    }
+}
+
+/// Global rendering-security controls, shown in a toolbar popover so their app-wide
+/// scope is clear and each option can carry an explanation.
+private struct SecuritySettingsView: View {
+    @EnvironmentObject private var appState: AppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Trust")
+                    .font(.headline)
+                Picker("Trust", selection: $appState.trustMode) {
+                    Text("Safe").tag(VaultTrustMode.safe)
+                    Text("Trusted").tag(VaultTrustMode.trusted)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                Text("Safe renders documents statically. Trusted lets a document run JavaScript — use it only for documents you trust.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("Allow network access", isOn: $appState.allowsNetworkAccess)
+                    .disabled(appState.trustMode != .trusted)
+                Text("Lets documents load remote resources and connect out. Available only in Trusted mode, and off by default.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(width: 320)
     }
 }

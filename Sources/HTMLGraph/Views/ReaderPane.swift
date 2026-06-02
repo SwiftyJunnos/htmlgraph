@@ -103,18 +103,6 @@ struct ReaderPane: View {
 
                     Spacer()
 
-                    Picker("Trust", selection: $appState.trustMode) {
-                        Text("Safe").tag(VaultTrustMode.safe)
-                        Text("Trusted").tag(VaultTrustMode.trusted)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 150)
-
-                    Toggle("Network", isOn: $appState.allowsNetworkAccess)
-                        .toggleStyle(.switch)
-                        .disabled(appState.trustMode != .trusted)
-                        .help("Network access is controlled separately from Trusted Mode.")
-
                     Button("Open External") {
                         let didOpen = NSWorkspace.shared.open(URL(fileURLWithPath: document.absolutePath))
                         if !didOpen {
