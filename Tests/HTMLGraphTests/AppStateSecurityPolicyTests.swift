@@ -153,6 +153,59 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertTrue(tree[2].children.isEmpty)
     }
 
+    func testCreateDocumentForUnresolvedWritesStubHtml() throws {
+        let vaultURL = try makeTemporaryVault(files: [
+            "index.html": "<html><head><title>Home</title></head><body></body></html>"
+        ])
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+        let appState = AppState()
+        appState.vaultURL = vaultURL
+
+        let edge = LinkEdge(
+            id: "index.html#link-0",
+            sourceId: "index.html",
+            targetId: nil,
+            href: "concepts/new-note.html",
+            normalizedTargetPath: "concepts/new-note.html",
+            fragment: nil,
+            linkText: "New Note",
+            status: .unresolved
+        )
+
+        appState.createDocument(forUnresolved: edge)
+
+        let created = vaultURL.appendingPathComponent("concepts/new-note.html")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: created.path))
+        let html = try String(contentsOf: created, encoding: .utf8)
+        XCTAssertTrue(html.contains("<title>New Note</title>"))
+        XCTAssertTrue(html.contains("<h1>New Note</h1>"))
+        XCTAssertNil(appState.errorMessage)
+    }
+
+    func testCreateDocumentIgnoresNonHtmlTarget() throws {
+        let vaultURL = try makeTemporaryVault(files: [
+            "index.html": "<html><head><title>Home</title></head><body></body></html>"
+        ])
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+        let appState = AppState()
+        appState.vaultURL = vaultURL
+
+        let edge = LinkEdge(
+            id: "index.html#link-0",
+            sourceId: "index.html",
+            targetId: nil,
+            href: "notes.txt",
+            normalizedTargetPath: "notes.txt",
+            fragment: nil,
+            linkText: "Notes",
+            status: .unresolved
+        )
+
+        appState.createDocument(forUnresolved: edge)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: vaultURL.appendingPathComponent("notes.txt").path))
+    }
+
     private func makeTemporaryVault(files: [String: String]) throws -> URL {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("HTMLGraphAppStateTests-\(UUID().uuidString)", isDirectory: true)

@@ -122,6 +122,9 @@ final class AppState: ObservableObject {
     private var accessedVaultURL: URL?
     private let recentsStore: RecentVaultsStore
 
+    /// A document id to select once the next index finishes (e.g. a just-created doc).
+    private var pendingSelectionId: String?
+
     init(recentsStore: RecentVaultsStore = RecentVaultsStore()) {
         self.recentsStore = recentsStore
         self.recentVaults = recentsStore.load()
@@ -356,7 +359,12 @@ final class AppState: ObservableObject {
         switch result {
         case .success(let builtIndex):
             index = builtIndex
-            sidebarSelection = builtIndex.documents.first.map { .document($0.id) }
+            if let pendingSelectionId, builtIndex.document(id: pendingSelectionId) != nil {
+                sidebarSelection = .document(pendingSelectionId)
+            } else {
+                sidebarSelection = builtIndex.documents.first.map { .document($0.id) }
+            }
+            pendingSelectionId = nil
             if let vaultURL {
                 inboxItems = (try? InboxScanner().scanInbox(at: vaultURL)) ?? inboxItems
             }
@@ -364,6 +372,7 @@ final class AppState: ObservableObject {
         case .failure(let error):
             index = nil
             sidebarSelection = nil
+            pendingSelectionId = nil
             errorMessage = error.localizedDescription
         }
     }
@@ -372,6 +381,7 @@ final class AppState: ObservableObject {
         guard generation == indexingGeneration else { return }
         isIndexing = false
         indexingTask = nil
+        pendingSelectionId = nil
     }
 
     deinit {
@@ -446,6 +456,52 @@ final class AppState: ObservableObject {
             suffix += 1
         }
         return candidate
+    }
+
+    /// Creates the missing target of an unresolved HTML link as a stub document,
+    /// then re-indexes and selects it. No-op for non-HTML or unresolvable targets.
+    func createDocument(forUnresolved edge: LinkEdge) {
+        guard let vaultURL, let relativePath = edge.normalizedTargetPath else { return }
+        let ext = (relativePath as NSString).pathExtension.lowercased()
+        guard ext == "html" || ext == "htm" else { return }
+
+        let fileURL = vaultURL.appendingPathComponent(relativePath)
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            let filename = (relativePath as NSString).lastPathComponent
+            let title = edge.linkText.isEmpty ? (filename as NSString).deletingPathExtension : edge.linkText
+            do {
+                try FileManager.default.createDirectory(
+                    at: fileURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try Self.stubHTML(title: title).write(to: fileURL, atomically: true, encoding: .utf8)
+            } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
+        }
+
+        pendingSelectionId = relativePath
+        beginSession(at: vaultURL)
+    }
+
+    private static func stubHTML(title: String) -> String {
+        let safe = title
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+        return """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="utf-8">
+            <title>\(safe)</title>
+        </head>
+        <body>
+            <h1>\(safe)</h1>
+        </body>
+        </html>
+        """
     }
 
     private func startInboxPolling() {

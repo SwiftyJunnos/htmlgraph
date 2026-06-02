@@ -1,3 +1,4 @@
+import AppKit
 import HTMLGraphCore
 import SwiftUI
 
@@ -100,16 +101,49 @@ struct ContextPane: View {
             )
         } else {
             List(unresolvedLinks) { edge in
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(edge.href)
-                        .lineLimit(1)
-                    Text(edge.linkText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(edge.href)
+                            .lineLimit(1)
+                        if !edge.linkText.isEmpty {
+                            Text(edge.linkText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                    Spacer(minLength: 4)
+                    if isCreatable(edge) {
+                        Button("Create") {
+                            appState.createDocument(forUnresolved: edge)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Create this missing document and open it.")
+                    }
+                }
+                .contextMenu {
+                    Button("Copy Link") {
+                        copyToPasteboard(edge.href)
+                    }
+                    if isCreatable(edge) {
+                        Button("Create Document") {
+                            appState.createDocument(forUnresolved: edge)
+                        }
+                    }
                 }
             }
         }
+    }
+
+    private func isCreatable(_ edge: LinkEdge) -> Bool {
+        guard let path = edge.normalizedTargetPath else { return false }
+        let ext = (path as NSString).pathExtension.lowercased()
+        return ext == "html" || ext == "htm"
+    }
+
+    private func copyToPasteboard(_ string: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
     }
 
     @ViewBuilder
