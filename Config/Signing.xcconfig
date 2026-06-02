@@ -2,5 +2,5 @@
 // Change these values to match the app record in your Apple Developer account.
 
 PRODUCT_BUNDLE_IDENTIFIER = com.junnos.htmlgraph
-DEVELOPMENT_TEAM =
+DEVELOPMENT_TEAM = TWHF9Z9WYT
 CODE_SIGN_STYLE = Automatic
