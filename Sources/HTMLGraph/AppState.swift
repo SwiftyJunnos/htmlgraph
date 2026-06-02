@@ -10,6 +10,54 @@ enum SidebarSelection: Hashable {
     case document(String)
 }
 
+/// A node in the sidebar's Documents tree: either a folder (document == nil, with
+/// children) or a leaf document.
+struct DocumentTreeNode: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let document: DocumentNode?
+    var children: [DocumentTreeNode]
+
+    var isFolder: Bool { document == nil }
+}
+
+/// Builds a folder hierarchy from documents' relative paths. Folders are sorted
+/// before documents at each level; documents are sorted by title.
+enum DocumentTreeBuilder {
+    static func build(from documents: [DocumentNode]) -> [DocumentTreeNode] {
+        build(documents, depth: 0, folderPrefix: "")
+    }
+
+    private static func build(_ documents: [DocumentNode], depth: Int, folderPrefix: String) -> [DocumentTreeNode] {
+        var folderGroups: [String: [DocumentNode]] = [:]
+        var leaves: [DocumentNode] = []
+
+        for document in documents {
+            let components = document.path.split(separator: "/").map(String.init)
+            if components.count <= depth + 1 {
+                leaves.append(document)
+            } else {
+                folderGroups[components[depth], default: []].append(document)
+            }
+        }
+
+        var nodes: [DocumentTreeNode] = []
+
+        for folderName in folderGroups.keys.sorted(by: { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }) {
+            let childPrefix = folderPrefix.isEmpty ? folderName : "\(folderPrefix)/\(folderName)"
+            let children = build(folderGroups[folderName] ?? [], depth: depth + 1, folderPrefix: childPrefix)
+            nodes.append(DocumentTreeNode(id: "folder:\(childPrefix)", name: folderName, document: nil, children: children))
+        }
+
+        for document in leaves.sorted(by: { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }) {
+            let filename = (document.path as NSString).lastPathComponent
+            nodes.append(DocumentTreeNode(id: document.id, name: filename, document: document, children: []))
+        }
+
+        return nodes
+    }
+}
+
 @MainActor
 final class AppState: ObservableObject {
     @Published var vaultURL: URL?
@@ -100,6 +148,11 @@ final class AppState: ObservableObject {
             (document.path as NSString).deletingLastPathComponent
         }
         return Set(folders).subtracting([""]).sorted()
+    }
+
+    /// Documents arranged as a folder hierarchy for the sidebar's tree view.
+    var documentTree: [DocumentTreeNode] {
+        DocumentTreeBuilder.build(from: index?.documents ?? [])
     }
 
     func openVault(_ url: URL) {

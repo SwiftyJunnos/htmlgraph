@@ -132,6 +132,27 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertEqual(appState.vaultFolders, ["concepts", "guides"])
     }
 
+    func testDocumentTreeBuildsFolderHierarchyFoldersBeforeDocuments() throws {
+        let html = { (title: String) in "<html><head><title>\(title)</title></head><body></body></html>" }
+        let vaultURL = try makeTemporaryVault(files: [
+            "index.html": html("Home"),
+            "concepts/backlinks.html": html("Backlinks"),
+            "concepts/graph.html": html("Graph"),
+            "guides/start.html": html("Start")
+        ])
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+        let index = try VaultIndexer().indexVault(at: vaultURL)
+
+        let tree = DocumentTreeBuilder.build(from: index.documents)
+
+        // Folders (sorted) first, then root-level documents.
+        XCTAssertEqual(tree.map(\.name), ["concepts", "guides", "index.html"])
+        XCTAssertNil(tree[0].document)
+        XCTAssertEqual(tree[0].children.map(\.name), ["backlinks.html", "graph.html"])
+        XCTAssertNotNil(tree[2].document)
+        XCTAssertTrue(tree[2].children.isEmpty)
+    }
+
     private func makeTemporaryVault(files: [String: String]) throws -> URL {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("HTMLGraphAppStateTests-\(UUID().uuidString)", isDirectory: true)
