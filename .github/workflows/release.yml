@@ -1,0 +1,189 @@
+# Builds, signs, notarizes, and publishes a downloadable .dmg when a version tag is
+# pushed (e.g. `git tag v0.1.0 && git push origin v0.1.0`), or on a manual run.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   MACOS_CERTIFICATE_P12_BASE64  base64 of an exported "Developer ID Application" .p12
+#                                 (Keychain Access → export the cert+key → .p12;
+#                                  then: base64 -i cert.p12 | pbcopy)
+#   MACOS_CERTIFICATE_PASSWORD    the password set when exporting that .p12
+#   KEYCHAIN_PASSWORD             any random string; password for the temp CI keychain
+#   NOTARY_APPLE_ID              the Apple ID email used for notarization
+#   NOTARY_PASSWORD              an app-specific password for that Apple ID
+#                                 (appleid.apple.com → Sign-In and Security → App-Specific Passwords)
+#
+# Requires Xcode 26+ on the runner: the app uses `#available(macOS 26.0, *)`, which
+# needs the macOS 26 SDK to compile.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to publish, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write # create the GitHub Release and upload the .dmg
+
+jobs:
+  release:
+    runs-on: macos-latest
+    env:
+      SCHEME: HTMLGraph
+      APP_NAME: HTMLGraph
+      TEAM_ID: XW996HTK32
+
+    steps:
+      # Actions are pinned to full commit SHAs (not mutable tags) because this job holds
+      # signing keys and secrets; a hijacked tag could otherwise run code beside them.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      # Pin to the newest stable Xcode so the macOS 26 SDK is present.
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          xcode-version: latest-stable
+
+      # The app uses #available(macOS 26.0, *), which needs the macOS 26 SDK to compile.
+      # Fail fast with a clear message if the runner image lags behind that floor.
+      - name: Verify macOS 26 SDK is available
+        run: |
+          set -euo pipefail
+          SDK_VER="$(xcrun --sdk macosx --show-sdk-version)"
+          echo "macOS SDK: $SDK_VER ($(xcodebuild -version | head -1))"
+          if [ "${SDK_VER%%.*}" -lt 26 ]; then
+            echo "::error::macOS SDK $SDK_VER < 26 — #available(macOS 26.0, *) will not compile. Bump the pinned Xcode/runner."
+            exit 1
+          fi
+
+      - name: Import Developer ID signing certificate
+        env:
+          CERT_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+          echo "$CERT_P12_BASE64" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERT_PATH" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+          rm -f "$CERT_PATH"
+
+      - name: Archive
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project HTMLGraph.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination "generic/platform=macOS" \
+            -archivePath "$RUNNER_TEMP/$APP_NAME.xcarchive" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Developer ID Application" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            archive
+
+      - name: Export (Developer ID)
+        run: |
+          set -euo pipefail
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/$APP_NAME.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath "$RUNNER_TEMP/export"
+
+      # Fail in seconds (not the minutes a bad notarization round-trip costs) if the
+      # export didn't produce a Developer ID-signed, hardened-runtime, timestamped app.
+      - name: Verify signing
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/export/$APP_NAME.app"
+          test -d "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          INFO="$(codesign -dvvv "$APP" 2>&1)"
+          echo "$INFO"
+          echo "$INFO" | grep -q "Authority=Developer ID Application" \
+            || { echo "::error::App is not Developer ID signed"; exit 1; }
+          echo "$INFO" | grep -Eq "flags=0x[0-9a-f]+\(.*runtime.*\)" \
+            || { echo "::error::Hardened runtime flag missing"; exit 1; }
+          echo "$INFO" | grep -q "^Timestamp=" \
+            || { echo "::error::Secure timestamp missing"; exit 1; }
+
+      - name: Create DMG
+        run: |
+          set -euo pipefail
+          brew install create-dmg
+
+          STAGE="$RUNNER_TEMP/dmg-stage"
+          mkdir -p "$STAGE"
+          cp -R "$RUNNER_TEMP/export/$APP_NAME.app" "$STAGE/"
+
+          # create-dmg exits non-zero if it can't set a custom icon (headless runner),
+          # so don't let that abort an otherwise-good DMG.
+          create-dmg \
+            --volname "$APP_NAME" \
+            --app-drop-link 420 200 \
+            --icon "$APP_NAME.app" 140 200 \
+            --window-size 600 400 \
+            "$RUNNER_TEMP/$APP_NAME.dmg" \
+            "$STAGE" || true
+
+          test -f "$RUNNER_TEMP/$APP_NAME.dmg"
+
+      - name: Notarize & staple
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Stash credentials in the temp keychain so the app-specific password isn't
+          # passed on the (long-running, --wait) notarytool command line / process table.
+          xcrun notarytool store-credentials notary-profile \
+            --apple-id "$NOTARY_APPLE_ID" \
+            --password "$NOTARY_PASSWORD" \
+            --team-id "$TEAM_ID" \
+            --keychain "$KEYCHAIN_PATH"
+
+          xcrun notarytool submit "$RUNNER_TEMP/$APP_NAME.dmg" \
+            --keychain-profile notary-profile \
+            --keychain "$KEYCHAIN_PATH" \
+            --wait
+          xcrun stapler staple "$RUNNER_TEMP/$APP_NAME.dmg"
+          xcrun stapler validate "$RUNNER_TEMP/$APP_NAME.dmg"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Read inputs via env (not ${{ }} interpolation) to avoid script injection.
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          # Tag push -> the tag; manual run -> the required `version` input. Refuse
+          # anything that isn't a v* tag so a workflow_dispatch on a branch can't create
+          # a release named after the branch.
+          VERSION="${INPUT_VERSION:-$GITHUB_REF_NAME}"
+          case "$VERSION" in
+            v*) ;;
+            *) echo "::error::Refusing to release non-version ref '$VERSION' (expected a v* tag)"; exit 1 ;;
+          esac
+          ASSET="$RUNNER_TEMP/$APP_NAME-$VERSION.dmg"
+          mv "$RUNNER_TEMP/$APP_NAME.dmg" "$ASSET"
+          gh release create "$VERSION" "$ASSET" \
+            --title "$APP_NAME $VERSION" \
+            --generate-notes

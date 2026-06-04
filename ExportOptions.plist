@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Export settings for a direct-download (non-App-Store) build, signed with a
+     "Developer ID Application" certificate. Used by `xcodebuild -exportArchive` in
+     .github/workflows/release.yml. Manual signing so CI can sign with a cert in a
+     temporary keychain without an Xcode-managed account. -->
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>developer-id</string>
+    <key>teamID</key>
+    <string>XW996HTK32</string>
+    <key>signingStyle</key>
+    <string>manual</string>
+    <key>signingCertificate</key>
+    <string>Developer ID Application</string>
+</dict>
+</plist>

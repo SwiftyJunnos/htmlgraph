@@ -6,3 +6,12 @@ build/
 DerivedData/
 xcuserdata/
 *.xcuserstate
+
+# Signing material — never commit certificates, requests, or private keys
+*.cer
+*.csr
+*.certSigningRequest
+*.p12
+*.p8
+*.mobileprovision
+*.provisionprofile
