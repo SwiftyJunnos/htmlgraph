@@ -9,11 +9,6 @@ struct ReaderPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if appState.networkBlockedNotice {
-                networkBlockedBanner
-                Divider()
-            }
-
             if appState.isIndexing {
                 ProgressView("Indexing vault...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -153,6 +148,14 @@ struct ReaderPane: View {
                 }
             }
         }
+        // A floating overlay rather than a VStack sibling: toggling a bar in the root
+        // layout at runtime perturbs the NavigationSplitView unified toolbar (the
+        // window titlebar collapses). An overlay never reflows the column or the toolbar.
+        .overlay(alignment: .bottom) {
+            if appState.networkBlockedNotice {
+                networkBlockedBanner
+            }
+        }
     }
 
     private func documentWebView(documentURL: URL, identity: String, vaultURL: URL, baseURL: URL) -> some View {
@@ -169,7 +172,11 @@ struct ReaderPane: View {
                 }
             },
             onNavigationError: { appState.errorMessage = $0 },
-            onNetworkBlocked: { _ in appState.networkBlockedNotice = true }
+            onNetworkBlocked: { _ in
+                // Defer out of the WebKit navigation callback so the state change can't
+                // land inside a SwiftUI layout pass.
+                DispatchQueue.main.async { appState.networkBlockedNotice = true }
+            }
         )
         .id(identity)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -183,41 +190,55 @@ struct ReaderPane: View {
 
     @ViewBuilder
     private var networkBlockedBanner: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .center, spacing: 12) {
             Image(systemName: "wifi.slash")
+                .font(.title3)
                 .foregroundStyle(.orange)
+
             VStack(alignment: .leading, spacing: 2) {
                 Text("Network content blocked")
                     .font(.callout.weight(.semibold))
-                Text("This document tried to load remote content (such as an embedded video). Allowing it also switches this vault to Trusted mode, which lets documents run JavaScript — only do this for documents you trust.")
+                Text("Embedded video and other remote content need network access. Allowing it also trusts this vault to run JavaScript.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Spacer(minLength: 12)
+            Spacer(minLength: 16)
 
-            Button("Trust & Allow Network") {
+            Button("Allow Network") {
                 appState.enableNetworkAccess()
             }
             .buttonStyle(.borderedProminent)
-            .controlSize(.small)
             .help("Switch this vault to Trusted mode with network access — lets documents run JavaScript and load remote content. Use only for documents you trust.")
 
             Button {
                 appState.networkBlockedNotice = false
             } label: {
-                Image(systemName: "xmark")
-                    .foregroundStyle(.secondary)
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.tertiary)
             }
             .buttonStyle(.plain)
             .help("Dismiss")
             .accessibilityLabel("Dismiss network notice")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.12))
+        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        // A neutral floating card (not a full-bleed colored bar). The unified toolbar
+        // is translucent, so a colored bar at the top edge would tint the whole
+        // titlebar; an inset, opaque, neutral card with an orange icon accent avoids
+        // that and reads cleaner.
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.primary.opacity(0.08))
+        }
+        .shadow(color: .black.opacity(0.12), radius: 12, y: 2)
+        .frame(maxWidth: 720)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
     }
 
     @ViewBuilder

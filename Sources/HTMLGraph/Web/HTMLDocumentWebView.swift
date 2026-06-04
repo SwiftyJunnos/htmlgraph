@@ -55,19 +55,34 @@ struct HTMLDocumentWebView: NSViewRepresentable {
         )
     }
 
-    func makeNSView(context: Context) -> WKWebView {
+    // The WKWebView lives inside a plain container NSView and is sized with an
+    // AUTORESIZING MASK, not Auto Layout constraints. WebKit's macOS media/fullscreen
+    // machinery saves and restores the web view's superview constraints when an
+    // HTML5 <video> lays out; activated constraints here collide with that and
+    // corrupt the host window's titlebar/safe-area (the sidebar then draws up under
+    // the traffic-light buttons). Autoresizing within our own container sidesteps it.
+    func makeNSView(context: Context) -> NSView {
+        let container = NSView()
+        container.autoresizesSubviews = true
+
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = policy.allowsJavaScript
 
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let webView = WKWebView(frame: container.bounds, configuration: configuration)
+        webView.translatesAutoresizingMaskIntoConstraints = true
+        webView.autoresizingMask = [.width, .height]
         webView.navigationDelegate = context.coordinator
+        container.addSubview(webView)
+
+        context.coordinator.webView = webView
         context.coordinator.prepareContentRulesIfNeeded(in: webView) {
             context.coordinator.load(in: webView)
         }
-        return webView
+        return container
     }
 
-    func updateNSView(_ webView: WKWebView, context: Context) {
+    func updateNSView(_ nsView: NSView, context: Context) {
+        guard let webView = context.coordinator.webView else { return }
         context.coordinator.update(
             documentURL: documentURL,
             vaultURL: vaultURL,
@@ -96,6 +111,7 @@ struct HTMLDocumentWebView: NSViewRepresentable {
         private var onNetworkBlocked: (URL) -> Void
         private var loadedDocumentURL: URL?
         private var contentRulesInstalled = false
+        weak var webView: WKWebView?
 
         init(
             documentURL: URL,
