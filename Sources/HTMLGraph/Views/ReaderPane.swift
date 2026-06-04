@@ -126,7 +126,7 @@ struct ReaderPane: View {
                         Button {
                             onChooseVault()
                         } label: {
-                            Label("Open Vault", systemImage: "folder")
+                            Label("Open Vault", systemImage: appState.openVaultSymbolName)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)

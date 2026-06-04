@@ -49,7 +49,7 @@ struct ContentView: View {
                     Button {
                         chooseVault()
                     } label: {
-                        Label(appState.openVaultButtonTitle, systemImage: "folder")
+                        Label(appState.openVaultButtonTitle, systemImage: appState.openVaultSymbolName)
                     }
                     .help("Choose a different local HTML folder to open as a vault.")
                 }

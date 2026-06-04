@@ -188,6 +188,18 @@ final class AppState: ObservableObject {
         vaultURL == nil ? "Open Vault" : "Change Vault"
     }
 
+    /// SF Symbol for the open/change-vault action. The directional "arrow into a
+    /// folder" glyph reads as "open a vault", but it only exists on macOS 26+, so we
+    /// fall back to folder-with-plus on the macOS 14 deployment floor where using the
+    /// newer name would render as a blank/missing symbol.
+    var openVaultSymbolName: String {
+        if #available(macOS 26.0, *) {
+            "arrow.forward.folder"
+        } else {
+            "folder.badge.plus"
+        }
+    }
+
     var vaultDisplayName: String? {
         guard let vaultURL else { return nil }
         return vaultURL.lastPathComponent.isEmpty ? vaultURL.path : vaultURL.lastPathComponent
