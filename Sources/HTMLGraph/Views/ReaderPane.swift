@@ -1,6 +1,34 @@
 import HTMLGraphCore
 import SwiftUI
 
+/// Stable identity for a rendered document/inbox web view, used as the SwiftUI `.id()`.
+///
+/// Embedding `trustMode` and `allowsNetworkAccess` here is load-bearing security, not
+/// cosmetic: `HTMLDocumentWebView` applies the security policy — the JavaScript gate
+/// (`allowsContentJavaScript`) and the network-blocking `WKContentRuleList` — only when
+/// the web view is built (`makeNSView`), never in `updateNSView`. A policy change can
+/// therefore only take effect by discarding and rebuilding the web view, which SwiftUI
+/// does precisely when this identity string changes. Drop trust/network from the identity
+/// and a Safe→Trusted (or network) toggle would silently fail to apply to the live view.
+/// `WebResourcePolicyTests` guards this invariant.
+enum WebViewIdentity {
+    static func make(
+        vaultPath: String,
+        contentId: String,
+        contentHash: String? = nil,
+        trustMode: VaultTrustMode,
+        allowsNetworkAccess: Bool
+    ) -> String {
+        var parts = [vaultPath, contentId]
+        if let contentHash {
+            parts.append(contentHash)
+        }
+        parts.append(trustMode.rawValue)
+        parts.append(String(allowsNetworkAccess))
+        return parts.joined(separator: "|")
+    }
+}
+
 struct ReaderPane: View {
     @EnvironmentObject private var appState: AppState
     @AppStorage("preferredEditorBundleID") private var preferredEditorBundleID = ""
@@ -126,7 +154,7 @@ struct ReaderPane: View {
                         Button {
                             onChooseVault()
                         } label: {
-                            Label("Open Vault", systemImage: "folder")
+                            Label("Open Vault", systemImage: appState.openVaultSymbolName)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
@@ -325,22 +353,22 @@ struct ReaderPane: View {
     }
 
     private func webViewIdentity(for document: DocumentNode, vaultURL: URL) -> String {
-        [
-            vaultURL.standardizedFileURL.path,
-            document.id,
-            appState.trustMode.rawValue,
-            String(appState.allowsNetworkAccess)
-        ].joined(separator: "|")
+        WebViewIdentity.make(
+            vaultPath: vaultURL.standardizedFileURL.path,
+            contentId: document.id,
+            trustMode: appState.trustMode,
+            allowsNetworkAccess: appState.allowsNetworkAccess
+        )
     }
 
     private func inboxWebViewIdentity(for item: InboxItem, vaultURL: URL) -> String {
-        [
-            vaultURL.standardizedFileURL.path,
-            item.id,
-            item.contentHash,
-            appState.trustMode.rawValue,
-            String(appState.allowsNetworkAccess)
-        ].joined(separator: "|")
+        WebViewIdentity.make(
+            vaultPath: vaultURL.standardizedFileURL.path,
+            contentId: item.id,
+            contentHash: item.contentHash,
+            trustMode: appState.trustMode,
+            allowsNetworkAccess: appState.allowsNetworkAccess
+        )
     }
 }
 

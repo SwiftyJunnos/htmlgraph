@@ -1,4 +1,5 @@
 @testable import HTMLGraph
+import HTMLGraphCore
 import XCTest
 
 final class WebResourcePolicyTests: XCTestCase {
@@ -62,6 +63,46 @@ final class WebResourcePolicyTests: XCTestCase {
 
         XCTAssertFalse(isBlocked("about:blank"))
         XCTAssertFalse(isBlocked("data:text/plain,hello"))
+    }
+
+    // MARK: - Web view identity must reflect the security policy
+
+    // HTMLDocumentWebView applies the JS gate and the network rule list only when the
+    // web view is constructed, so a policy change takes effect only by rebuilding the
+    // view — which SwiftUI does when the `.id()` (this identity) changes. Trust mode and
+    // network access MUST therefore be part of the identity, or a Safe<->Trusted/network
+    // toggle would not apply to the live document. These tests pin that invariant.
+
+    func testIdentityChangesWithTrustMode() {
+        let safe = WebViewIdentity.make(vaultPath: "/v", contentId: "a.html", trustMode: .safe, allowsNetworkAccess: false)
+        let trusted = WebViewIdentity.make(vaultPath: "/v", contentId: "a.html", trustMode: .trusted, allowsNetworkAccess: false)
+        XCTAssertNotEqual(safe, trusted)
+    }
+
+    func testIdentityChangesWithNetworkAccess() {
+        let off = WebViewIdentity.make(vaultPath: "/v", contentId: "a.html", trustMode: .trusted, allowsNetworkAccess: false)
+        let on = WebViewIdentity.make(vaultPath: "/v", contentId: "a.html", trustMode: .trusted, allowsNetworkAccess: true)
+        XCTAssertNotEqual(off, on)
+    }
+
+    func testInboxIdentityChangesWithTrustMode() {
+        let safe = WebViewIdentity.make(vaultPath: "/v", contentId: "a.html", contentHash: "h", trustMode: .safe, allowsNetworkAccess: false)
+        let trusted = WebViewIdentity.make(vaultPath: "/v", contentId: "a.html", contentHash: "h", trustMode: .trusted, allowsNetworkAccess: false)
+        XCTAssertNotEqual(safe, trusted)
+    }
+
+    func testIdentityIsStableWhenPolicyUnchanged() {
+        let a = WebViewIdentity.make(vaultPath: "/v", contentId: "a.html", trustMode: .safe, allowsNetworkAccess: false)
+        let b = WebViewIdentity.make(vaultPath: "/v", contentId: "a.html", trustMode: .safe, allowsNetworkAccess: false)
+        XCTAssertEqual(a, b)
+    }
+
+    func testIdentityDistinguishesContentAndVault() {
+        let base = WebViewIdentity.make(vaultPath: "/v", contentId: "a.html", trustMode: .safe, allowsNetworkAccess: false)
+        let otherDoc = WebViewIdentity.make(vaultPath: "/v", contentId: "b.html", trustMode: .safe, allowsNetworkAccess: false)
+        let otherVault = WebViewIdentity.make(vaultPath: "/w", contentId: "a.html", trustMode: .safe, allowsNetworkAccess: false)
+        XCTAssertNotEqual(base, otherDoc)
+        XCTAssertNotEqual(base, otherVault)
     }
 }
 

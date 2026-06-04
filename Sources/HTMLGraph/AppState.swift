@@ -95,6 +95,42 @@ struct RecentVaultsStore {
     }
 }
 
+/// The security posture a user chose for a particular vault: whether documents may
+/// run JavaScript (trust) and reach the network. Remembered so reopening a vault
+/// restores the same posture instead of silently dropping back to Safe.
+struct VaultSecuritySettings: Codable, Equatable {
+    var trustMode: VaultTrustMode
+    var allowsNetworkAccess: Bool
+}
+
+/// UserDefaults-backed map of vault path -> remembered security settings. Pure
+/// storage, keyed by the same standardized path `RecentVault` uses as identity.
+struct VaultSecurityStore {
+    private let defaults: UserDefaults
+    private let key = "vaultSecuritySettings"
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    private func loadAll() -> [String: VaultSecuritySettings] {
+        guard let data = defaults.data(forKey: key) else { return [:] }
+        return (try? JSONDecoder().decode([String: VaultSecuritySettings].self, from: data)) ?? [:]
+    }
+
+    func settings(forPath path: String) -> VaultSecuritySettings? {
+        loadAll()[path]
+    }
+
+    func save(_ settings: VaultSecuritySettings, forPath path: String) {
+        var all = loadAll()
+        all[path] = settings
+        if let data = try? JSONEncoder().encode(all) {
+            defaults.set(data, forKey: key)
+        }
+    }
+}
+
 @MainActor
 final class AppState: ObservableObject {
     @Published var vaultURL: URL?
@@ -115,11 +151,13 @@ final class AppState: ObservableObject {
             if trustMode != .trusted {
                 allowsNetworkAccess = false
             }
+            persistSecuritySettingsIfNeeded()
         }
     }
     @Published var allowsNetworkAccess = false {
         didSet {
             if allowsNetworkAccess { networkBlockedNotice = false }
+            persistSecuritySettingsIfNeeded()
         }
     }
     @Published var errorMessage: String?
@@ -138,6 +176,10 @@ final class AppState: ObservableObject {
     /// The single folder we currently hold a security-scoped access claim on.
     private var accessedVaultURL: URL?
     private let recentsStore: RecentVaultsStore
+    private let securityStore: VaultSecurityStore
+    /// True while restoring a vault's saved security posture, so the property
+    /// `didSet`s don't immediately persist the value we just loaded back.
+    private var isApplyingVaultSecurity = false
 
     /// Serves the current vault's files over loopback HTTP so documents render from a
     /// real web origin. Outlives individual web views, so it lives here in AppState.
@@ -146,8 +188,12 @@ final class AppState: ObservableObject {
     /// A document id to select once the next index finishes (e.g. a just-created doc).
     private var pendingSelectionId: String?
 
-    init(recentsStore: RecentVaultsStore = RecentVaultsStore()) {
+    init(
+        recentsStore: RecentVaultsStore = RecentVaultsStore(),
+        securityStore: VaultSecurityStore = VaultSecurityStore()
+    ) {
         self.recentsStore = recentsStore
+        self.securityStore = securityStore
         self.recentVaults = recentsStore.load()
     }
 
@@ -184,8 +230,42 @@ final class AppState: ObservableObject {
         networkBlockedNotice = false
     }
 
+    /// Restores the security posture remembered for `url`, defaulting to Safe for a
+    /// vault we've never seen. Suppresses persistence so loading doesn't re-save.
+    private func applyStoredSecuritySettings(for url: URL) {
+        let stored = securityStore.settings(forPath: url.standardizedFileURL.path)
+            ?? VaultSecuritySettings(trustMode: .safe, allowsNetworkAccess: false)
+        isApplyingVaultSecurity = true
+        trustMode = stored.trustMode
+        // Network access is only meaningful in Trusted mode; clamp defensively.
+        allowsNetworkAccess = stored.trustMode == .trusted && stored.allowsNetworkAccess
+        isApplyingVaultSecurity = false
+    }
+
+    /// Persists the live trust/network posture for the open vault. No-op while a
+    /// restore is in flight or when no vault is open (e.g. app-launch defaults).
+    private func persistSecuritySettingsIfNeeded() {
+        guard !isApplyingVaultSecurity, let url = vaultURL else { return }
+        securityStore.save(
+            VaultSecuritySettings(trustMode: trustMode, allowsNetworkAccess: allowsNetworkAccess),
+            forPath: url.standardizedFileURL.path
+        )
+    }
+
     var openVaultButtonTitle: String {
         vaultURL == nil ? "Open Vault" : "Change Vault"
+    }
+
+    /// SF Symbol for the open/change-vault action. The directional "arrow into a
+    /// folder" glyph reads as "open a vault", but it only exists on macOS 26+, so we
+    /// fall back to folder-with-plus on the macOS 14 deployment floor where using the
+    /// newer name would render as a blank/missing symbol.
+    var openVaultSymbolName: String {
+        if #available(macOS 26.0, *) {
+            "arrow.forward.folder"
+        } else {
+            "folder.badge.plus"
+        }
     }
 
     var vaultDisplayName: String? {
@@ -305,15 +385,12 @@ final class AppState: ObservableObject {
     /// Shared work of opening a vault: cancel prior tasks, reset state, kick off
     /// indexing + inbox polling. Access/bookmark handling happens in the callers.
     private func beginSession(at url: URL) {
-        // Trust and network access are per-vault. Reset them on an actual vault
-        // change, but preserve them across same-vault reindexes (e.g. creating a doc
-        // or accepting an inbox item) so an enabled session isn't silently revoked.
+        // Trust and network access are per-vault and remembered across launches. On an
+        // actual vault change, restore the posture the user last chose for this vault
+        // (Safe by default). Same-vault reindexes (creating a doc, accepting an inbox
+        // item) keep the live settings so an enabled session isn't silently revoked.
         let isDifferentVault = vaultURL?.standardizedFileURL.path
             .caseInsensitiveCompare(url.standardizedFileURL.path) != .orderedSame
-        if isDifferentVault {
-            trustMode = .safe
-            allowsNetworkAccess = false
-        }
 
         indexingTask?.cancel()
         inboxPollingTask?.cancel()
@@ -321,6 +398,9 @@ final class AppState: ObservableObject {
         let generation = UUID()
         indexingGeneration = generation
         vaultURL = url
+        if isDifferentVault {
+            applyStoredSecuritySettings(for: url)
+        }
         index = nil
         sidebarSelection = nil
         errorMessage = nil

@@ -1,3 +1,8 @@
+// DispatchWorkItem predates Sendable annotations; here the timeout work item is only
+// ever created and cancelled on the serial `queue`, so it's safe to capture in the
+// @Sendable receive closure. Import Dispatch @preconcurrency to silence that spurious
+// capture warning without downgrading Foundation's other concurrency diagnostics.
+@preconcurrency import Dispatch
 import Foundation
 import HTMLGraphCore
 import Network
