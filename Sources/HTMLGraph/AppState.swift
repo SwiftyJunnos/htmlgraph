@@ -98,8 +98,13 @@ struct RecentVaultsStore {
 @MainActor
 final class AppState: ObservableObject {
     @Published var vaultURL: URL?
+    /// Loopback origin (`http://127.0.0.1:<port>/<token>/`) the current vault is served
+    /// from. Documents render from this so third-party web embeds get a real web origin.
+    @Published var vaultBaseURL: URL?
     @Published var index: VaultIndex?
-    @Published var sidebarSelection: SidebarSelection?
+    @Published var sidebarSelection: SidebarSelection? {
+        didSet { networkBlockedNotice = false }
+    }
     @Published var searchText = ""
     @Published var trustMode: VaultTrustMode = .safe {
         didSet {
@@ -108,8 +113,16 @@ final class AppState: ObservableObject {
             }
         }
     }
-    @Published var allowsNetworkAccess = false
+    @Published var allowsNetworkAccess = false {
+        didSet {
+            if allowsNetworkAccess { networkBlockedNotice = false }
+        }
+    }
     @Published var errorMessage: String?
+    /// Set when the current document was prevented from loading remote content
+    /// because the vault has network access turned off. Drives the in-reader
+    /// "Allow Network Access" banner; cleared on selection change and when granted.
+    @Published var networkBlockedNotice = false
     @Published var isIndexing = false
     @Published var inboxItems: [InboxItem] = []
     @Published private(set) var recentVaults: [RecentVault] = []
@@ -121,6 +134,10 @@ final class AppState: ObservableObject {
     /// The single folder we currently hold a security-scoped access claim on.
     private var accessedVaultURL: URL?
     private let recentsStore: RecentVaultsStore
+
+    /// Serves the current vault's files over loopback HTTP so documents render from a
+    /// real web origin. Outlives individual web views, so it lives here in AppState.
+    private let httpServer = VaultHTTPServer()
 
     /// A document id to select once the next index finishes (e.g. a just-created doc).
     private var pendingSelectionId: String?
@@ -152,6 +169,15 @@ final class AppState: ObservableObject {
 
     var securityPolicy: VaultSecurityPolicy {
         VaultSecurityPolicy(mode: trustMode, allowsNetworkAccess: allowsNetworkAccess)
+    }
+
+    /// Grants the current vault network access. Network access requires Trusted
+    /// mode, so both flags move together. The rendered web view reloads on its own
+    /// because its identity includes the trust mode and network flag.
+    func enableNetworkAccess() {
+        trustMode = .trusted
+        allowsNetworkAccess = true
+        networkBlockedNotice = false
     }
 
     var openVaultButtonTitle: String {
@@ -285,6 +311,17 @@ final class AppState: ObservableObject {
         sidebarSelection = nil
         errorMessage = nil
         isIndexing = true
+
+        vaultBaseURL = nil
+        httpServer.start(vaultURL: url) { base in
+            Task { @MainActor [weak self] in
+                guard let self, self.vaultURL == url else { return }
+                self.vaultBaseURL = base
+                if base == nil {
+                    self.errorMessage = "Could not start the local preview server."
+                }
+            }
+        }
         do {
             try refreshInbox()
         } catch {
@@ -387,6 +424,7 @@ final class AppState: ObservableObject {
     deinit {
         indexingTask?.cancel()
         inboxPollingTask?.cancel()
+        httpServer.stop()
         accessedVaultURL?.stopAccessingSecurityScopedResource()
     }
 

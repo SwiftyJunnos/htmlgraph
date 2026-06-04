@@ -76,6 +76,11 @@ final class VaultResourceSchemeHandlerTests: XCTestCase {
         XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "icon.svg")), "image/svg+xml")
         XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "image.png")), "image/png")
         XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "photo.jpeg")), "image/jpeg")
+        XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "clip.mp4")), "video/mp4")
+        XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "clip.webm")), "video/webm")
+        XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "chime.m4a")), "audio/mp4")
+        XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "tune.mp3")), "audio/mpeg")
+        XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "anim.gif")), "image/gif")
         XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "file.bin")), "application/octet-stream")
     }
 }

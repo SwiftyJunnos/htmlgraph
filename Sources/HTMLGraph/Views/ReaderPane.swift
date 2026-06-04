@@ -9,6 +9,11 @@ struct ReaderPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if appState.networkBlockedNotice {
+                networkBlockedBanner
+                Divider()
+            }
+
             if appState.isIndexing {
                 ProgressView("Indexing vault...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -57,26 +62,16 @@ struct ReaderPane: View {
                 Divider()
 
                 if let vaultURL = appState.vaultURL {
-                    HTMLDocumentWebView(
-                        documentURL: URL(fileURLWithPath: item.absolutePath),
-                        vaultURL: vaultURL,
-                        policy: appState.securityPolicy,
-                        knownDocumentIds: Set(appState.index?.documents.map(\.id) ?? []),
-                        onInternalNavigation: { relativePath in
-                            appState.selectDocument(relativePath)
-                        },
-                        onExternalNavigation: { url in
-                            let didOpen = NSWorkspace.shared.open(url)
-                            if !didOpen {
-                                appState.errorMessage = "Could not open \(url.absoluteString) in the default external app."
-                            }
-                        },
-                        onNavigationError: { message in
-                            appState.errorMessage = message
-                        }
-                    )
-                    .id(inboxWebViewIdentity(for: item, vaultURL: vaultURL))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if let baseURL = appState.vaultBaseURL {
+                        documentWebView(
+                            documentURL: URL(fileURLWithPath: item.absolutePath),
+                            identity: inboxWebViewIdentity(for: item, vaultURL: vaultURL),
+                            vaultURL: vaultURL,
+                            baseURL: baseURL
+                        )
+                    } else {
+                        preparingPreview
+                    }
                 } else {
                     ContentUnavailableView(
                         "No vault selected",
@@ -106,26 +101,16 @@ struct ReaderPane: View {
                 Divider()
 
                 if let vaultURL = appState.vaultURL {
-                    HTMLDocumentWebView(
-                        documentURL: URL(fileURLWithPath: document.absolutePath),
-                        vaultURL: vaultURL,
-                        policy: appState.securityPolicy,
-                        knownDocumentIds: Set(appState.index?.documents.map(\.id) ?? []),
-                        onInternalNavigation: { relativePath in
-                            appState.selectDocument(relativePath)
-                        },
-                        onExternalNavigation: { url in
-                            let didOpen = NSWorkspace.shared.open(url)
-                            if !didOpen {
-                                appState.errorMessage = "Could not open \(url.absoluteString) in the default external app."
-                            }
-                        },
-                        onNavigationError: { message in
-                            appState.errorMessage = message
-                        }
-                    )
-                    .id(webViewIdentity(for: document, vaultURL: vaultURL))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if let baseURL = appState.vaultBaseURL {
+                        documentWebView(
+                            documentURL: URL(fileURLWithPath: document.absolutePath),
+                            identity: webViewIdentity(for: document, vaultURL: vaultURL),
+                            vaultURL: vaultURL,
+                            baseURL: baseURL
+                        )
+                    } else {
+                        preparingPreview
+                    }
                 } else {
                     ContentUnavailableView(
                         "No vault selected",
@@ -168,6 +153,71 @@ struct ReaderPane: View {
                 }
             }
         }
+    }
+
+    private func documentWebView(documentURL: URL, identity: String, vaultURL: URL, baseURL: URL) -> some View {
+        HTMLDocumentWebView(
+            documentURL: documentURL,
+            vaultURL: vaultURL,
+            baseURL: baseURL,
+            policy: appState.securityPolicy,
+            knownDocumentIds: Set(appState.index?.documents.map(\.id) ?? []),
+            onInternalNavigation: { appState.selectDocument($0) },
+            onExternalNavigation: { url in
+                if !NSWorkspace.shared.open(url) {
+                    appState.errorMessage = "Could not open \(url.absoluteString) in the default external app."
+                }
+            },
+            onNavigationError: { appState.errorMessage = $0 },
+            onNetworkBlocked: { _ in appState.networkBlockedNotice = true }
+        )
+        .id(identity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var preparingPreview: some View {
+        ProgressView("Preparing preview…")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var networkBlockedBanner: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: "wifi.slash")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Network content blocked")
+                    .font(.callout.weight(.semibold))
+                Text("This document tried to load remote content (such as an embedded video). Allowing it also switches this vault to Trusted mode, which lets documents run JavaScript — only do this for documents you trust.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 12)
+
+            Button("Trust & Allow Network") {
+                appState.enableNetworkAccess()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .help("Switch this vault to Trusted mode with network access — lets documents run JavaScript and load remote content. Use only for documents you trust.")
+
+            Button {
+                appState.networkBlockedNotice = false
+            } label: {
+                Image(systemName: "xmark")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss")
+            .accessibilityLabel("Dismiss network notice")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.12))
     }
 
     @ViewBuilder

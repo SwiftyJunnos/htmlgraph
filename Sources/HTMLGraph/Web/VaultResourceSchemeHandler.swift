@@ -93,6 +93,30 @@ final class VaultResourceSchemeHandler: NSObject, WKURLSchemeHandler {
             return "image/png"
         case "jpg", "jpeg":
             return "image/jpeg"
+        case "gif":
+            return "image/gif"
+        case "webp":
+            return "image/webp"
+        case "mp4", "m4v":
+            return "video/mp4"
+        case "webm":
+            return "video/webm"
+        case "mov":
+            return "video/quicktime"
+        case "ogg", "ogv":
+            return "video/ogg"
+        case "mp3":
+            return "audio/mpeg"
+        case "m4a", "aac":
+            return "audio/mp4"
+        case "wav":
+            return "audio/wav"
+        case "json":
+            return "application/json"
+        case "woff":
+            return "font/woff"
+        case "woff2":
+            return "font/woff2"
         default:
             return "application/octet-stream"
         }
@@ -100,7 +124,7 @@ final class VaultResourceSchemeHandler: NSObject, WKURLSchemeHandler {
 
     private nonisolated static func textEncodingName(for fileURL: URL) -> String? {
         switch fileURL.pathExtension.lowercased() {
-        case "html", "htm", "css", "js", "svg":
+        case "html", "htm", "css", "js", "svg", "json":
             return "utf-8"
         default:
             return nil
