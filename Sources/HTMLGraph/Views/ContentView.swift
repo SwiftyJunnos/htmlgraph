@@ -17,14 +17,18 @@ struct ContentView: View {
             } onAcceptInboxItem: { item in
                 acceptInboxItem(item)
             }
-        }
-        // The context panel (backlinks / unresolved / local graph) lives in a native
-        // inspector so it gets the same collapse/expand affordance the leading sidebar
-        // already has. The toolbar button below toggles it, and the binding is persisted
-        // so the choice sticks across launches.
-        .inspector(isPresented: $showsContextPanel) {
-            ContextPane()
-                .inspectorColumnWidth(min: 220, ideal: 280, max: 720)
+            // The context panel (backlinks / unresolved / local graph) lives in a native
+            // inspector so it gets the same collapse/expand affordance the leading sidebar
+            // has; the toolbar button below toggles it and the binding is persisted across
+            // launches. Attach it to the detail, NOT the whole NavigationSplitView:
+            // attaching at the split-view level makes the leading sidebar clip and shift
+            // off-screen (and the inspector's own overlays drop) once the inspector is
+            // dragged to a large width. On the detail it stays a trailing pane and leaves
+            // the sidebar layout untouched.
+            .inspector(isPresented: $showsContextPanel) {
+                ContextPane()
+                    .inspectorColumnWidth(min: 220, ideal: 280, max: 720)
+            }
         }
         .navigationTitle(appState.vaultDisplayName ?? "HTMLGraph")
         .navigationSubtitle(appState.vaultStatusText)
