@@ -101,6 +101,10 @@ final class AppState: ObservableObject {
     /// Loopback origin (`http://127.0.0.1:<port>/<token>/`) the current vault is served
     /// from. Documents render from this so third-party web embeds get a real web origin.
     @Published var vaultBaseURL: URL?
+    /// True when the loopback preview server failed to start for the current vault.
+    /// Separate from `errorMessage` so a successful index doesn't erase it (which would
+    /// otherwise leave the reader stuck on an unexplained "Preparing preview…").
+    @Published var previewServerFailed = false
     @Published var index: VaultIndex?
     @Published var sidebarSelection: SidebarSelection? {
         didSet { networkBlockedNotice = false }
@@ -301,6 +305,16 @@ final class AppState: ObservableObject {
     /// Shared work of opening a vault: cancel prior tasks, reset state, kick off
     /// indexing + inbox polling. Access/bookmark handling happens in the callers.
     private func beginSession(at url: URL) {
+        // Trust and network access are per-vault. Reset them on an actual vault
+        // change, but preserve them across same-vault reindexes (e.g. creating a doc
+        // or accepting an inbox item) so an enabled session isn't silently revoked.
+        let isDifferentVault = vaultURL?.standardizedFileURL.path
+            .caseInsensitiveCompare(url.standardizedFileURL.path) != .orderedSame
+        if isDifferentVault {
+            trustMode = .safe
+            allowsNetworkAccess = false
+        }
+
         indexingTask?.cancel()
         inboxPollingTask?.cancel()
 
@@ -313,13 +327,14 @@ final class AppState: ObservableObject {
         isIndexing = true
 
         vaultBaseURL = nil
+        previewServerFailed = false
         httpServer.start(vaultURL: url) { base in
             Task { @MainActor [weak self] in
                 guard let self, self.vaultURL == url else { return }
                 self.vaultBaseURL = base
-                if base == nil {
-                    self.errorMessage = "Could not start the local preview server."
-                }
+                // Tracked separately from errorMessage so a successful index doesn't
+                // erase it (finishIndexing clears errorMessage unconditionally).
+                self.previewServerFailed = (base == nil)
             }
         }
         do {

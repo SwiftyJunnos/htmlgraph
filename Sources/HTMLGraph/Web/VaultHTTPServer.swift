@@ -71,7 +71,18 @@ struct VaultHTTPResponder {
                     body: Data()
                 )
             }
-            let body = wantsBody ? (Self.readFile(at: resolvedURL, range: range) ?? Data()) : Data()
+            let body: Data
+            if wantsBody {
+                // Don't fall back to an empty body while still advertising the range
+                // length — a read failure must surface as 500, not a corrupt 206.
+                guard let partial = Self.readFile(at: resolvedURL, range: range),
+                      partial.count == range.count else {
+                    return Self.status(500, "Internal Server Error")
+                }
+                body = partial
+            } else {
+                body = Data()
+            }
             return Response(
                 status: 206,
                 reason: "Partial Content",
@@ -86,7 +97,15 @@ struct VaultHTTPResponder {
             )
         }
 
-        let body = wantsBody ? ((try? Data(contentsOf: resolvedURL)) ?? Data()) : Data()
+        let body: Data
+        if wantsBody {
+            guard let full = try? Data(contentsOf: resolvedURL), full.count == size else {
+                return Self.status(500, "Internal Server Error")
+            }
+            body = full
+        } else {
+            body = Data()
+        }
         return Response(
             status: 200,
             reason: "OK",

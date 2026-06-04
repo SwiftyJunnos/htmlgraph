@@ -184,8 +184,17 @@ struct ReaderPane: View {
 
     @ViewBuilder
     private var preparingPreview: some View {
-        ProgressView("Preparing preview…")
+        if appState.previewServerFailed {
+            ContentUnavailableView(
+                "Preview unavailable",
+                systemImage: "exclamationmark.triangle",
+                description: Text("The local preview server could not start. Try reopening the vault.")
+            )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ProgressView("Preparing preview…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
     @ViewBuilder

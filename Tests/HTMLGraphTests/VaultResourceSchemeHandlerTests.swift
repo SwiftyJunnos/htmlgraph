@@ -81,6 +81,15 @@ final class VaultResourceSchemeHandlerTests: XCTestCase {
         XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "chime.m4a")), "audio/mp4")
         XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "tune.mp3")), "audio/mpeg")
         XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "anim.gif")), "image/gif")
+        XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "photo.webp")), "image/webp")
+        XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "clip.m4v")), "video/mp4")
+        XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "clip.mov")), "video/quicktime")
+        XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "clip.ogv")), "video/ogg")
+        XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "sound.aac")), "audio/mp4")
+        XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "sound.wav")), "audio/wav")
+        XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "data.json")), "application/json")
+        XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "font.woff")), "font/woff")
+        XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "font.woff2")), "font/woff2")
         XCTAssertEqual(VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: "file.bin")), "application/octet-stream")
     }
 }
