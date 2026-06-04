@@ -17,6 +17,90 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertEqual(appState.securityPolicy, VaultSecurityPolicy(mode: .safe, allowsNetworkAccess: false))
     }
 
+    // MARK: - Per-vault security persistence
+
+    func testSecurityStoreRoundTripsPerPath() {
+        let (defaults, suite) = scratchDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = VaultSecurityStore(defaults: defaults)
+
+        store.save(VaultSecuritySettings(trustMode: .trusted, allowsNetworkAccess: true), forPath: "/tmp/a")
+        store.save(VaultSecuritySettings(trustMode: .safe, allowsNetworkAccess: false), forPath: "/tmp/b")
+
+        XCTAssertEqual(store.settings(forPath: "/tmp/a"), VaultSecuritySettings(trustMode: .trusted, allowsNetworkAccess: true))
+        XCTAssertEqual(store.settings(forPath: "/tmp/b"), VaultSecuritySettings(trustMode: .safe, allowsNetworkAccess: false))
+        XCTAssertNil(store.settings(forPath: "/tmp/never-seen"))
+    }
+
+    func testSecurityStoreReturnsNilOnCorruptData() {
+        let (defaults, suite) = scratchDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(Data("not json".utf8), forKey: "vaultSecuritySettings")
+        XCTAssertNil(VaultSecurityStore(defaults: defaults).settings(forPath: "/tmp/a"))
+    }
+
+    func testChangingSecuritySettingsPersistsForOpenVault() {
+        let (defaults, suite) = scratchDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = VaultSecurityStore(defaults: defaults)
+        let appState = AppState(securityStore: store)
+        let url = URL(fileURLWithPath: "/tmp/vaultX", isDirectory: true)
+        appState.vaultURL = url
+
+        appState.trustMode = .trusted
+        appState.allowsNetworkAccess = true
+
+        XCTAssertEqual(
+            store.settings(forPath: url.standardizedFileURL.path),
+            VaultSecuritySettings(trustMode: .trusted, allowsNetworkAccess: true)
+        )
+    }
+
+    func testSecuritySettingsAreNotPersistedWithoutAnOpenVault() {
+        let (defaults, suite) = scratchDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = VaultSecurityStore(defaults: defaults)
+        let appState = AppState(securityStore: store)
+
+        appState.trustMode = .trusted
+        appState.allowsNetworkAccess = true
+
+        XCTAssertNil(store.settings(forPath: "/tmp/vaultX"))
+    }
+
+    func testSecuritySettingsAreRememberedAcrossVaultSwitches() throws {
+        let (defaults, suite) = scratchDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let html = "<html><head><title>T</title></head><body></body></html>"
+        let vaultA = try makeTemporaryVault(files: ["index.html": html])
+        let vaultB = try makeTemporaryVault(files: ["index.html": html])
+        defer {
+            try? FileManager.default.removeItem(at: vaultA)
+            try? FileManager.default.removeItem(at: vaultB)
+        }
+        let appState = AppState(securityStore: VaultSecurityStore(defaults: defaults))
+
+        // Trust vault A with network access.
+        appState.openVault(vaultA)
+        appState.trustMode = .trusted
+        appState.allowsNetworkAccess = true
+
+        // Switching to a never-trusted vault drops back to Safe.
+        appState.openVault(vaultB)
+        XCTAssertEqual(appState.trustMode, .safe)
+        XCTAssertFalse(appState.allowsNetworkAccess)
+
+        // Reopening vault A restores the remembered posture.
+        appState.openVault(vaultA)
+        XCTAssertEqual(appState.trustMode, .trusted)
+        XCTAssertTrue(appState.allowsNetworkAccess)
+    }
+
+    private func scratchDefaults() -> (UserDefaults, String) {
+        let suite = "AppStateSecurityTests-\(UUID().uuidString)"
+        return (UserDefaults(suiteName: suite)!, suite)
+    }
+
     func testVaultStatusPresentationReflectsClosedIndexingAndOpenStates() {
         let appState = AppState()
 

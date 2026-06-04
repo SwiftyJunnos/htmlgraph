@@ -99,8 +99,9 @@ struct ContentView: View {
     }
 }
 
-/// Global rendering-security controls, shown in a toolbar popover so their app-wide
-/// scope is clear and each option can carry an explanation.
+/// Per-vault rendering-security controls, shown in a toolbar popover where each option
+/// can carry an explanation. The chosen trust/network posture is remembered per vault
+/// (see `AppState`) and restored when that vault is reopened.
 private struct SecuritySettingsView: View {
     @EnvironmentObject private var appState: AppState
 
