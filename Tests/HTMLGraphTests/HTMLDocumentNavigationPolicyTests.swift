@@ -78,18 +78,54 @@ final class HTMLDocumentNavigationPolicyTests: XCTestCase {
         XCTAssertTrue(message.contains("https://example.com/redirect"))
     }
 
-    func testNonMainFrameExternalNavigationReturnsError() {
+    func testNonMainFrameNetworkNavigationReturnsNetworkBlockedWhenNetworkOff() {
         let policy = makePolicy()
         let url = URL(string: "https://example.com/frame.html")!
 
-        guard case .error(let message) = policy.decision(
-            for: url,
-            isMainFrame: false,
-            isUserInitiated: false
-        ) else {
-            return XCTFail("Expected error for external subframe navigation")
-        }
-        XCTAssertTrue(message.contains("https://example.com/frame.html"))
+        XCTAssertEqual(
+            policy.decision(for: url, isMainFrame: false, isUserInitiated: false),
+            .networkBlocked(url)
+        )
+    }
+
+    func testAboutBlankSubframeIsAllowed() {
+        let policy = makePolicy()
+        let url = URL(string: "about:blank")!
+
+        XCTAssertEqual(
+            policy.decision(for: url, isMainFrame: false, isUserInitiated: false),
+            .allow
+        )
+    }
+
+    func testAboutBlankMainFrameIsAllowed() {
+        let policy = makePolicy()
+        let url = URL(string: "about:blank")!
+
+        XCTAssertEqual(
+            policy.decision(for: url, isMainFrame: true, isUserInitiated: false),
+            .allow
+        )
+    }
+
+    func testAboutSrcdocSubframeIsAllowed() {
+        let policy = makePolicy()
+        let url = URL(string: "about:srcdoc")!
+
+        XCTAssertEqual(
+            policy.decision(for: url, isMainFrame: false, isUserInitiated: false),
+            .allow
+        )
+    }
+
+    func testAboutSrcdocImpostorIsNotAllowed() {
+        let policy = makePolicy()
+        let url = URL(string: "about:srcdocEVIL")!
+
+        XCTAssertNotEqual(
+            policy.decision(for: url, isMainFrame: false, isUserInitiated: false),
+            .allow
+        )
     }
 
     func testNonMainFrameVaultFileAllowsNavigation() {
@@ -116,11 +152,32 @@ final class HTMLDocumentNavigationPolicyTests: XCTestCase {
         XCTAssertTrue(message.contains("secret.html"))
     }
 
-    private func makePolicy() -> HTMLDocumentNavigationPolicy {
+    func testNonMainFrameNetworkEmbedAllowedWhenNetworkAccessEnabled() {
+        let policy = makePolicy(allowsNetworkAccess: true)
+        let url = URL(string: "https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ")!
+
+        XCTAssertEqual(
+            policy.decision(for: url, isMainFrame: false, isUserInitiated: false),
+            .allow
+        )
+    }
+
+    func testNonMainFrameNetworkEmbedBlockedWhenNetworkAccessDisabled() {
+        let policy = makePolicy(allowsNetworkAccess: false)
+        let url = URL(string: "https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ")!
+
+        XCTAssertEqual(
+            policy.decision(for: url, isMainFrame: false, isUserInitiated: false),
+            .networkBlocked(url)
+        )
+    }
+
+    private func makePolicy(allowsNetworkAccess: Bool = false) -> HTMLDocumentNavigationPolicy {
         HTMLDocumentNavigationPolicy(
             currentDocumentURL: vaultURL.appendingPathComponent("index.html"),
             vaultURL: vaultURL,
-            knownDocumentIds: knownDocumentIds
+            knownDocumentIds: knownDocumentIds,
+            allowsNetworkAccess: allowsNetworkAccess
         )
     }
 }

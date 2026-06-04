@@ -109,7 +109,7 @@ private struct SecuritySettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Toggle("Allow network access", isOn: $appState.allowsNetworkAccess)
                     .disabled(appState.trustMode != .trusted)
-                Text("Lets documents load remote resources and connect out. Available only in Trusted mode, and off by default.")
+                Text("Lets documents load remote resources and connect out. Requires Trusted mode, so enabling it also lets documents run JavaScript. Off by default.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

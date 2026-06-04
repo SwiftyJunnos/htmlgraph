@@ -57,26 +57,16 @@ struct ReaderPane: View {
                 Divider()
 
                 if let vaultURL = appState.vaultURL {
-                    HTMLDocumentWebView(
-                        documentURL: URL(fileURLWithPath: item.absolutePath),
-                        vaultURL: vaultURL,
-                        policy: appState.securityPolicy,
-                        knownDocumentIds: Set(appState.index?.documents.map(\.id) ?? []),
-                        onInternalNavigation: { relativePath in
-                            appState.selectDocument(relativePath)
-                        },
-                        onExternalNavigation: { url in
-                            let didOpen = NSWorkspace.shared.open(url)
-                            if !didOpen {
-                                appState.errorMessage = "Could not open \(url.absoluteString) in the default external app."
-                            }
-                        },
-                        onNavigationError: { message in
-                            appState.errorMessage = message
-                        }
-                    )
-                    .id(inboxWebViewIdentity(for: item, vaultURL: vaultURL))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if let baseURL = appState.vaultBaseURL {
+                        documentWebView(
+                            documentURL: URL(fileURLWithPath: item.absolutePath),
+                            identity: inboxWebViewIdentity(for: item, vaultURL: vaultURL),
+                            vaultURL: vaultURL,
+                            baseURL: baseURL
+                        )
+                    } else {
+                        preparingPreview
+                    }
                 } else {
                     ContentUnavailableView(
                         "No vault selected",
@@ -106,26 +96,16 @@ struct ReaderPane: View {
                 Divider()
 
                 if let vaultURL = appState.vaultURL {
-                    HTMLDocumentWebView(
-                        documentURL: URL(fileURLWithPath: document.absolutePath),
-                        vaultURL: vaultURL,
-                        policy: appState.securityPolicy,
-                        knownDocumentIds: Set(appState.index?.documents.map(\.id) ?? []),
-                        onInternalNavigation: { relativePath in
-                            appState.selectDocument(relativePath)
-                        },
-                        onExternalNavigation: { url in
-                            let didOpen = NSWorkspace.shared.open(url)
-                            if !didOpen {
-                                appState.errorMessage = "Could not open \(url.absoluteString) in the default external app."
-                            }
-                        },
-                        onNavigationError: { message in
-                            appState.errorMessage = message
-                        }
-                    )
-                    .id(webViewIdentity(for: document, vaultURL: vaultURL))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if let baseURL = appState.vaultBaseURL {
+                        documentWebView(
+                            documentURL: URL(fileURLWithPath: document.absolutePath),
+                            identity: webViewIdentity(for: document, vaultURL: vaultURL),
+                            vaultURL: vaultURL,
+                            baseURL: baseURL
+                        )
+                    } else {
+                        preparingPreview
+                    }
                 } else {
                     ContentUnavailableView(
                         "No vault selected",
@@ -168,6 +148,106 @@ struct ReaderPane: View {
                 }
             }
         }
+        // A floating overlay rather than a VStack sibling: toggling a bar in the root
+        // layout at runtime perturbs the NavigationSplitView unified toolbar (the
+        // window titlebar collapses). An overlay never reflows the column or the toolbar.
+        .overlay(alignment: .bottom) {
+            if appState.networkBlockedNotice {
+                networkBlockedBanner
+            }
+        }
+    }
+
+    private func documentWebView(documentURL: URL, identity: String, vaultURL: URL, baseURL: URL) -> some View {
+        HTMLDocumentWebView(
+            documentURL: documentURL,
+            vaultURL: vaultURL,
+            baseURL: baseURL,
+            policy: appState.securityPolicy,
+            knownDocumentIds: Set(appState.index?.documents.map(\.id) ?? []),
+            onInternalNavigation: { appState.selectDocument($0) },
+            onExternalNavigation: { url in
+                if !NSWorkspace.shared.open(url) {
+                    appState.errorMessage = "Could not open \(url.absoluteString) in the default external app."
+                }
+            },
+            onNavigationError: { appState.errorMessage = $0 },
+            onNetworkBlocked: { _ in
+                // Defer out of the WebKit navigation callback so the state change can't
+                // land inside a SwiftUI layout pass.
+                DispatchQueue.main.async { appState.networkBlockedNotice = true }
+            }
+        )
+        .id(identity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var preparingPreview: some View {
+        if appState.previewServerFailed {
+            ContentUnavailableView(
+                "Preview unavailable",
+                systemImage: "exclamationmark.triangle",
+                description: Text("The local preview server could not start. Try reopening the vault.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ProgressView("Preparing preview…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private var networkBlockedBanner: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "wifi.slash")
+                .font(.title3)
+                .foregroundStyle(.orange)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Network content blocked")
+                    .font(.callout.weight(.semibold))
+                Text("Embedded video and other remote content need network access. Allowing it also trusts this vault to run JavaScript.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 16)
+
+            Button("Allow Network") {
+                appState.enableNetworkAccess()
+            }
+            .buttonStyle(.borderedProminent)
+            .help("Switch this vault to Trusted mode with network access — lets documents run JavaScript and load remote content. Use only for documents you trust.")
+
+            Button {
+                appState.networkBlockedNotice = false
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss")
+            .accessibilityLabel("Dismiss network notice")
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        // A neutral floating card (not a full-bleed colored bar). The unified toolbar
+        // is translucent, so a colored bar at the top edge would tint the whole
+        // titlebar; an inset, opaque, neutral card with an orange icon accent avoids
+        // that and reads cleaner.
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.primary.opacity(0.08))
+        }
+        .shadow(color: .black.opacity(0.12), radius: 12, y: 2)
+        .frame(maxWidth: 720)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
     }
 
     @ViewBuilder
