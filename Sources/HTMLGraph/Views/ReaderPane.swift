@@ -29,11 +29,24 @@ enum WebViewIdentity {
     }
 }
 
+/// Whether the document pane is showing the rendered preview or the editable HTML source.
+enum EditorMode {
+    case read
+    case edit
+}
+
 struct ReaderPane: View {
     @EnvironmentObject private var appState: AppState
     @AppStorage("preferredEditorBundleID") private var preferredEditorBundleID = ""
     let onChooseVault: () -> Void
     let onAcceptInboxItem: (InboxItem) -> Void
+
+    /// Read vs Edit for the current document. View-local because it's a presentation
+    /// concern; the actual edit buffer lives in `AppState` so it survives view rebuilds.
+    @State private var editorMode: EditorMode = .read
+    /// Guards against re-entrancy when we programmatically revert a selection change the
+    /// user cancelled out of (reverting re-fires `onChange`).
+    @State private var isRevertingSelection = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -106,9 +119,18 @@ struct ReaderPane: View {
             } else if let document = appState.selectedDocument {
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(document.title)
-                            .font(.headline)
-                            .lineLimit(1)
+                        HStack(spacing: 6) {
+                            Text(document.title)
+                                .font(.headline)
+                                .lineLimit(1)
+                            if editorMode == .edit, appState.hasUnsavedEdits {
+                                Circle()
+                                    .fill(Color.secondary)
+                                    .frame(width: 6, height: 6)
+                                    .help("Unsaved changes")
+                                    .accessibilityLabel("Unsaved changes")
+                            }
+                        }
                         Text(document.path)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -117,31 +139,22 @@ struct ReaderPane: View {
 
                     Spacer()
 
+                    if editorMode == .edit {
+                        Button("Save") { appState.saveEditorBuffer() }
+                            .keyboardShortcut("s", modifiers: .command)
+                            .disabled(!appState.hasUnsavedEdits)
+                            .help("Save changes to this document (⌘S).")
+                    }
+
+                    editorModePicker
+
                     openInEditorButton(absolutePath: document.absolutePath)
                 }
                 .padding()
 
                 Divider()
 
-                if let vaultURL = appState.vaultURL {
-                    if let baseURL = appState.vaultBaseURL {
-                        documentWebView(
-                            documentURL: URL(fileURLWithPath: document.absolutePath),
-                            identity: webViewIdentity(for: document, vaultURL: vaultURL),
-                            vaultURL: vaultURL,
-                            baseURL: baseURL
-                        )
-                    } else {
-                        preparingPreview
-                    }
-                } else {
-                    ContentUnavailableView(
-                        "No vault selected",
-                        systemImage: "folder",
-                        description: Text("Choose a local HTML folder to render this document.")
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+                documentContent(for: document)
             } else {
                 if appState.vaultURL == nil {
                     VStack(spacing: 16) {
@@ -184,6 +197,115 @@ struct ReaderPane: View {
                 networkBlockedBanner
             }
         }
+        // Leaving the document we're editing must not silently drop unsaved text.
+        .onChange(of: appState.sidebarSelection) { oldValue, newValue in
+            handleSelectionChange(from: oldValue, to: newValue)
+        }
+        .alert(
+            "Document changed on disk",
+            isPresented: Binding(
+                get: { appState.editorConflict != nil },
+                set: { if !$0 { appState.dismissConflict() } }
+            )
+        ) {
+            Button("Overwrite", role: .destructive) { appState.resolveConflictByOverwriting() }
+            Button("Reload") { appState.resolveConflictByReloading() }
+            Button("Cancel", role: .cancel) { appState.dismissConflict() }
+        } message: {
+            Text("“\(appState.editorConflict?.documentId ?? "")” was modified by another program since you started editing. Overwrite it with your changes, or reload the version on disk — reloading discards your unsaved edits.")
+        }
+    }
+
+    // MARK: - Editor mode
+
+    private var editorModePicker: some View {
+        Picker("View mode", selection: editorModeBinding) {
+            Text("Read").tag(EditorMode.read)
+            Text("Edit").tag(EditorMode.edit)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+        .help("Switch between reading the rendered document and editing its HTML source.")
+    }
+
+    private var editorModeBinding: Binding<EditorMode> {
+        Binding(
+            get: { editorMode },
+            set: { newMode in
+                switch newMode {
+                case .edit: enterEditMode()
+                case .read: exitEditMode()
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func documentContent(for document: DocumentNode) -> some View {
+        if editorMode == .edit {
+            DocumentSourceEditor(
+                text: Binding(
+                    get: { appState.editorBuffer?.currentText ?? "" },
+                    set: { appState.updateEditorText($0) }
+                ),
+                isEditable: true
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let vaultURL = appState.vaultURL {
+            if let baseURL = appState.vaultBaseURL {
+                documentWebView(
+                    documentURL: URL(fileURLWithPath: document.absolutePath),
+                    identity: webViewIdentity(for: document, vaultURL: vaultURL),
+                    vaultURL: vaultURL,
+                    baseURL: baseURL
+                )
+            } else {
+                preparingPreview
+            }
+        } else {
+            ContentUnavailableView(
+                "No vault selected",
+                systemImage: "folder",
+                description: Text("Choose a local HTML folder to render this document.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func enterEditMode() {
+        guard editorMode != .edit, let document = appState.selectedDocument else { return }
+        if appState.beginEditing(document) {
+            editorMode = .edit
+        }
+    }
+
+    private func exitEditMode() {
+        guard editorMode != .read else { return }
+        // confirmLeavingEditor returns false to abort (user cancelled, or a conflict needs
+        // resolving first) — stay in Edit so the buffer isn't lost.
+        if appState.hasUnsavedEdits, !EditorGuard.confirmLeavingEditor(appState) {
+            return
+        }
+        appState.endEditing()
+        editorMode = .read
+    }
+
+    private func handleSelectionChange(from oldValue: SidebarSelection?, to newValue: SidebarSelection?) {
+        if isRevertingSelection {
+            isRevertingSelection = false
+            return
+        }
+        guard editorMode == .edit else { return }
+
+        if appState.hasUnsavedEdits, !EditorGuard.confirmLeavingEditor(appState) {
+            // Cancelled or unresolved conflict — put the selection back where it was.
+            isRevertingSelection = true
+            appState.sidebarSelection = oldValue
+            return
+        }
+        appState.endEditing()
+        editorMode = .read
     }
 
     private func documentWebView(documentURL: URL, identity: String, vaultURL: URL, baseURL: URL) -> some View {
@@ -356,6 +478,10 @@ struct ReaderPane: View {
         WebViewIdentity.make(
             vaultPath: vaultURL.standardizedFileURL.path,
             contentId: document.id,
+            // Including the content hash rebuilds the preview after an in-app save: the
+            // incremental reindex updates the document's hash, the identity changes, and
+            // SwiftUI discards and reloads the web view (which re-fetches fresh bytes).
+            contentHash: document.contentHash,
             trustMode: appState.trustMode,
             allowsNetworkAccess: appState.allowsNetworkAccess
         )

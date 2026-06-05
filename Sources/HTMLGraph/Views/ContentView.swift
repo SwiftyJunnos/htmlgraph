@@ -102,6 +102,7 @@ struct ContentView: View {
     }
 
     private func chooseVault() {
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
         appState.chooseAndOpenVault()
     }
 

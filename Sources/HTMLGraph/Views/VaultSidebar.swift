@@ -177,7 +177,7 @@ private func documentContextMenu(_ document: DocumentNode, appState: AppState) -
         Button("As HTML Link") { SidebarCommands.copyToPasteboard(SidebarCommands.htmlLink(for: document)) }
     }
     Divider()
-    Button("Duplicate") { appState.duplicateDocument(document) }
+    Button("Duplicate") { SidebarActions.duplicate(document, appState: appState) }
     let currentFolder = (document.path as NSString).deletingLastPathComponent
     Menu("Move to") {
         // Same items for every document so the menu shape doesn't depend on where the
@@ -224,6 +224,7 @@ private func inboxContextMenu(_ item: InboxItem, appState: AppState) -> some Vie
 @MainActor
 enum SidebarActions {
     static func newDocument(inFolder folder: String?, appState: AppState) {
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
         let location = folder.map { "in “\($0)”" } ?? "in the vault root"
         guard let name = SidebarCommands.promptForName(
             title: "New Document",
@@ -235,6 +236,7 @@ enum SidebarActions {
     }
 
     static func newFolder(inParent parent: String?, appState: AppState) {
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
         let location = parent.map { "inside “\($0)”" } ?? "in the vault root"
         guard let name = SidebarCommands.promptForName(
             title: "New Folder",
@@ -245,7 +247,13 @@ enum SidebarActions {
         appState.createFolder(named: name, inParent: parent)
     }
 
+    static func duplicate(_ document: DocumentNode, appState: AppState) {
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
+        appState.duplicateDocument(document)
+    }
+
     static func rename(_ document: DocumentNode, appState: AppState) {
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
         let count = appState.backlinkCount(forDocument: document.id)
         let warning = count > 0
             ? "\n\n⚠️ \(count) \(documentsWord(count)) link to this file. Renaming it will break those links."
@@ -260,6 +268,7 @@ enum SidebarActions {
     }
 
     static func move(_ document: DocumentNode, to folder: String?, appState: AppState) {
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
         let count = appState.backlinkCount(forDocument: document.id)
         if count > 0 {
             let destination = folder ?? "the vault root"
@@ -273,6 +282,7 @@ enum SidebarActions {
     }
 
     static func delete(_ document: DocumentNode, appState: AppState) {
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
         let count = appState.backlinkCount(forDocument: document.id)
         let extra = count > 0
             ? " \(count) \(documentsWord(count)) link to it — those links will break."

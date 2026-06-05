@@ -116,6 +116,7 @@ struct ContextPane: View {
                     Spacer(minLength: 4)
                     if isCreatable(edge) {
                         Button("Create") {
+                            guard EditorGuard.confirmLeavingEditor(appState) else { return }
                             appState.createDocument(forUnresolved: edge)
                         }
                         .buttonStyle(.borderless)
@@ -128,6 +129,7 @@ struct ContextPane: View {
                     }
                     if isCreatable(edge) {
                         Button("Create Document") {
+                            guard EditorGuard.confirmLeavingEditor(appState) else { return }
                             appState.createDocument(forUnresolved: edge)
                         }
                     }
