@@ -8,6 +8,16 @@ import SwiftUI
 struct DocumentSourceEditor: NSViewRepresentable {
     @Binding var text: String
     var isEditable: Bool = true
+    /// Tints the writing surface a faint accent so the editor canvas itself reads as "live"
+    /// — the third coordinated cue (with the header wash and accent rule) that announces
+    /// Editor mode. A dynamic color so it tracks Light/Dark without re-applying.
+    var accentTinted: Bool = false
+
+    /// `.textBackgroundColor` nudged 5% toward the accent. Resolved per-appearance inside
+    /// the dynamic provider so it stays correct across a Light/Dark switch while open.
+    private static let tintedBackgroundColor = NSColor(name: nil) { _ in
+        NSColor.textBackgroundColor.blended(withFraction: 0.05, of: .controlAccentColor) ?? .textBackgroundColor
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(text: $text)
@@ -50,6 +60,11 @@ struct DocumentSourceEditor: NSViewRepresentable {
         )
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
 
+        if accentTinted {
+            scrollView.backgroundColor = Self.tintedBackgroundColor
+            textView.backgroundColor = Self.tintedBackgroundColor
+        }
+
         textView.string = text
         context.coordinator.textView = textView
         return scrollView
@@ -59,6 +74,10 @@ struct DocumentSourceEditor: NSViewRepresentable {
         guard let textView = nsView.documentView as? NSTextView else { return }
         context.coordinator.text = $text
         textView.isEditable = isEditable
+
+        let background: NSColor = accentTinted ? Self.tintedBackgroundColor : .textBackgroundColor
+        nsView.backgroundColor = background
+        textView.backgroundColor = background
 
         // Only push the model into the view when they actually differ — e.g. a programmatic
         // baseline reload after Discard/conflict-Reload. Re-setting on every keystroke

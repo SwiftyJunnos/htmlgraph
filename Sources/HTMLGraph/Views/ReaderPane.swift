@@ -119,18 +119,9 @@ struct ReaderPane: View {
             } else if let document = appState.selectedDocument {
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            Text(document.title)
-                                .font(.headline)
-                                .lineLimit(1)
-                            if editorMode == .edit, appState.hasUnsavedEdits {
-                                Circle()
-                                    .fill(Color.secondary)
-                                    .frame(width: 6, height: 6)
-                                    .help("Unsaved changes")
-                                    .accessibilityLabel("Unsaved changes")
-                            }
-                        }
+                        Text(document.title)
+                            .font(.headline)
+                            .lineLimit(1)
                         Text(document.path)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -139,20 +130,23 @@ struct ReaderPane: View {
 
                     Spacer()
 
-                    if editorMode == .edit {
-                        Button("Save") { appState.saveEditorBuffer() }
-                            .keyboardShortcut("s", modifiers: .command)
-                            .disabled(!appState.hasUnsavedEdits)
-                            .help("Save changes to this document (⌘S).")
-                    }
-
-                    editorModePicker
-
-                    openInEditorButton(absolutePath: document.absolutePath)
+                    modeButton(for: document)
+                    externalActionsMenu(absolutePath: document.absolutePath)
                 }
                 .padding()
+                // First of three coordinated Editor-mode cues: the header strip washes a
+                // faint accent so the mode change is *felt*, not a silent pane swap.
+                .background(editorMode == .edit ? Color.accentColor.opacity(0.06) : Color.clear)
+                .animation(.easeInOut(duration: 0.15), value: editorMode)
 
-                Divider()
+                // Second cue: the plain divider becomes a 2pt accent rule while editing.
+                if editorMode == .edit {
+                    Rectangle()
+                        .fill(Color.accentColor)
+                        .frame(height: 2)
+                } else {
+                    Divider()
+                }
 
                 documentContent(for: document)
             } else {
@@ -218,40 +212,133 @@ struct ReaderPane: View {
 
     // MARK: - Editor mode
 
-    private var editorModePicker: some View {
-        Picker("View mode", selection: editorModeBinding) {
-            Text("Read").tag(EditorMode.read)
-            Text("Edit").tag(EditorMode.edit)
+    /// The in-app mode toggle: a single button labelled by its ACTION (never the current
+    /// state), so it always says what a click does — "Edit Source" while reading, "Done"
+    /// while editing. State legibility is carried by the environment (header wash, accent
+    /// rule, status bar), not this button, so it stays calm and bordered. ⌘↩ toggles it.
+    private func modeButton(for document: DocumentNode) -> some View {
+        Button {
+            toggleEditMode()
+        } label: {
+            if editorMode == .edit {
+                Label("Done", systemImage: "checkmark")
+            } else {
+                Label("Edit Source", systemImage: "chevron.left.forwardslash.chevron.right")
+            }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .fixedSize()
-        .help("Switch between reading the rendered document and editing its HTML source.")
+        .buttonStyle(.bordered)
+        // ⌘↩ ("commit") rather than ⌘E — ⌘E is the system "Use Selection for Find" action
+        // inside the source NSTextView, and shadowing it while editing would surprise users.
+        .keyboardShortcut(.return, modifiers: .command)
+        .help(editorMode == .edit
+            ? "Finish editing and return to the rendered view (⌘↩)."
+            : "Edit this document’s HTML source in-app (⌘↩).")
     }
 
-    private var editorModeBinding: Binding<EditorMode> {
-        Binding(
-            get: { editorMode },
-            set: { newMode in
-                switch newMode {
-                case .edit: enterEditMode()
-                case .read: exitEditMode()
+    /// External-editor and Finder actions, kept as a separate momentary-action menu so they
+    /// never hide behind the stateful mode toggle (the old split button conflated the two).
+    /// A quiet ellipsis menu, visible in both modes, so the heavier "edit in a real editor"
+    /// path stays one permanent click away.
+    private func externalActionsMenu(absolutePath: String) -> some View {
+        let editors = ExternalEditor.installedEditors()
+        return Menu {
+            if editors.isEmpty {
+                Text("No supported editor found")
+            } else {
+                Section("Open Source In…") {
+                    ForEach(editors) { editor in
+                        Button("Open in \(editor.name)") {
+                            preferredEditorBundleID = editor.bundleID
+                            openWith(editor, absolutePath: absolutePath)
+                        }
+                    }
                 }
             }
-        )
+            Divider()
+            Button("Reveal in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: absolutePath)])
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.button)
+        .buttonStyle(.borderless)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Open the HTML source in an external editor, or reveal it in Finder.")
+        .accessibilityLabel("Document actions")
+    }
+
+    /// Third Editor-mode cue, and the new home of the save state. A persistent bottom bar
+    /// (Editor mode only) replacing the header Save button: its fixed presence ends the
+    /// appear/disappear layout shift and gives an always-visible saved / unsaved / conflict
+    /// readout. ⌘S still saves (from the inline Save button while dirty).
+    private func editorStatusBar(for document: DocumentNode) -> some View {
+        HStack(spacing: 8) {
+            if appState.editorConflict != nil {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("Conflict — resolve to continue")
+                    .foregroundStyle(.secondary)
+            } else if appState.hasUnsavedEdits {
+                Image(systemName: "circle.fill")
+                    .font(.system(size: 7))
+                    .foregroundStyle(.orange)
+                Text("Unsaved")
+                    .foregroundStyle(.secondary)
+                Button("Save") { appState.saveEditorBuffer() }
+                    .controlSize(.small)
+                    .keyboardShortcut("s", modifiers: .command)
+                    .help("Save changes to this document (⌘S).")
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.secondary)
+                Text("Saved")
+                    .foregroundStyle(.secondary)
+                if let savedAt = appState.editorBuffer?.baselineMTime {
+                    Text(savedAt, style: .time)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Spacer()
+
+            Text(document.path)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .font(.caption)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(.thinMaterial)
+    }
+
+    private func toggleEditMode() {
+        if editorMode == .edit {
+            exitEditMode()
+        } else {
+            enterEditMode()
+        }
     }
 
     @ViewBuilder
     private func documentContent(for document: DocumentNode) -> some View {
         if editorMode == .edit {
-            DocumentSourceEditor(
-                text: Binding(
-                    get: { appState.editorBuffer?.currentText ?? "" },
-                    set: { appState.updateEditorText($0) }
-                ),
-                isEditable: true
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VStack(spacing: 0) {
+                DocumentSourceEditor(
+                    text: Binding(
+                        get: { appState.editorBuffer?.currentText ?? "" },
+                        set: { appState.updateEditorText($0) }
+                    ),
+                    isEditable: true,
+                    accentTinted: true
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                Divider()
+                editorStatusBar(for: document)
+            }
         } else if let vaultURL = appState.vaultURL {
             if let baseURL = appState.vaultBaseURL {
                 documentWebView(
