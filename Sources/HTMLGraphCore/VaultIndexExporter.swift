@@ -16,6 +16,11 @@ public struct ExportedGraph: Codable, Equatable, Sendable {
         self.index = index
     }
 
+    // These cases (apart from `schemaVersion`) must mirror `VaultIndex`'s stored
+    // properties one-for-one — the flat shape is produced by hand below, so a new
+    // `VaultIndex` field will be silently dropped from `graph.json` until it is
+    // added here too. `VaultIndexExporterTests.testExportedKeysCoverAllVaultIndexFields`
+    // guards against that drift by reflecting over `VaultIndex`.
     private enum CodingKeys: String, CodingKey {
         case schemaVersion
         case vaultId
@@ -97,7 +102,7 @@ public struct VaultIndexExporter {
 
         let fileURL = directory.appendingPathComponent(Self.fileName)
         let payload = ExportedGraph(schemaVersion: Self.schemaVersion, index: index)
-        let data = try VaultIndexJSON.encoder.encode(payload)
+        let data = try VaultIndexJSON.interoperableEncoder.encode(payload)
         try data.write(to: fileURL, options: [.atomic])
 
         return fileURL

@@ -20,7 +20,9 @@ final class VaultIndexExporterTests: XCTestCase {
     func testRoundTripsDecodeEqual() throws {
         let vaultURL = makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: vaultURL) }
-        let index = makeIndex(vaultId: vaultURL.path, lastIndexedAt: Date(timeIntervalSince1970: 1.234567))
+        // Millisecond-aligned dates so the interoperable (RFC 3339 ms) encoding
+        // round-trips exactly and `decoded.index == index` holds.
+        let index = makeIndex(vaultId: vaultURL.path, lastIndexedAt: Date(timeIntervalSince1970: 1_717_171_717))
 
         let written = try VaultIndexExporter().export(index, vaultURL: vaultURL)
         let data = try Data(contentsOf: written)
@@ -69,16 +71,54 @@ final class VaultIndexExporterTests: XCTestCase {
         XCTAssertEqual(decoded.index, second)
     }
 
-    func testRoundTripsHighPrecisionDateExactly() throws {
+    func testEncodesInteroperableRFC3339Milliseconds() throws {
         let vaultURL = makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: vaultURL) }
-        let date = Date(timeIntervalSince1970: 1_717_171_717.123456)
-        let index = makeIndex(vaultId: vaultURL.path, lastIndexedAt: date)
+        let preciseDate = Date(timeIntervalSince1970: 1_717_171_717.123456)
+        let index = makeIndex(vaultId: vaultURL.path, lastIndexedAt: preciseDate)
 
         let written = try VaultIndexExporter().export(index, vaultURL: vaultURL)
-        let decoded = try VaultIndexJSON.decoder.decode(ExportedGraph.self, from: Data(contentsOf: written))
+        let json = try String(contentsOf: written, encoding: .utf8)
 
-        XCTAssertEqual(decoded.index.lastIndexedAt, date)
+        // Exported timestamps are RFC 3339 with exactly 3 fractional digits — the
+        // 17-digit lossless form used by the internal cache breaks standard parsers.
+        let rfc3339Millis = try NSRegularExpression(
+            pattern: #""lastIndexedAt" : "\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z""#
+        )
+        XCTAssertEqual(
+            rfc3339Millis.numberOfMatches(in: json, range: NSRange(json.startIndex..., in: json)),
+            1,
+            json
+        )
+        XCTAssertFalse(json.contains(".12345"), "sub-millisecond digits must be dropped: \(json)")
+
+        // Decoding is lossy only below the millisecond.
+        let decoded = try VaultIndexJSON.decoder.decode(ExportedGraph.self, from: Data(contentsOf: written))
+        XCTAssertEqual(
+            decoded.index.lastIndexedAt.timeIntervalSince1970,
+            preciseDate.timeIntervalSince1970,
+            accuracy: 0.001
+        )
+    }
+
+    func testExportedKeysCoverAllVaultIndexFields() throws {
+        let vaultURL = makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+        let index = makeIndex(vaultId: vaultURL.path, lastIndexedAt: Date(timeIntervalSince1970: 1))
+
+        let written = try VaultIndexExporter().export(index, vaultURL: vaultURL)
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: written)) as? [String: Any]
+        let jsonKeys = Set((object ?? [:]).keys)
+
+        // Every stored property of VaultIndex must appear in graph.json; if a new
+        // field is added without updating ExportedGraph's flat encoding, it would
+        // silently drop out and this guard fails.
+        let indexFields = Set(Mirror(reflecting: index).children.compactMap(\.label))
+        XCTAssertTrue(
+            indexFields.isSubset(of: jsonKeys),
+            "graph.json is missing VaultIndex fields: \(indexFields.subtracting(jsonKeys))"
+        )
+        XCTAssertTrue(jsonKeys.contains("schemaVersion"))
     }
 
     private func makeIndex(vaultId: String, lastIndexedAt: Date) -> VaultIndex {

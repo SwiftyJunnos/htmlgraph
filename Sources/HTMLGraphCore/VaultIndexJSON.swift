@@ -2,11 +2,17 @@ import Foundation
 
 /// Shared JSON coding configuration for `VaultIndex` artifacts.
 ///
-/// Both `VaultIndexCache` (the internal restore cache) and `VaultIndexExporter`
-/// (the AI-facing `graph.json` sidecar) encode/decode `VaultIndex` with identical
-/// settings: pretty-printed, sorted keys, and a custom ISO8601 date strategy that
-/// round-trips sub-second precision exactly. Keeping the configuration in one place
-/// guarantees the two artifacts never drift apart.
+/// Two encoders share the same structural settings (pretty-printed, sorted keys)
+/// but differ in how dates are written:
+/// - ``encoder`` writes dates with full 17-fractional-digit precision so the
+///   internal restore cache (`VaultIndexCache`) round-trips a `Date` exactly.
+/// - ``interoperableEncoder`` writes RFC 3339 millisecond timestamps for the
+///   AI-facing `graph.json` sidecar (`VaultIndexExporter`), because the 17-digit
+///   form is rejected by most standard ISO 8601 parsers (JavaScript, Python, Go,
+///   Foundation).
+///
+/// ``decoder`` reads either form back (it accepts 1–17 fractional digits), so it
+/// decodes both the cache file and the exported sidecar.
 enum VaultIndexJSON {
     static var encoder: JSONEncoder {
         let encoder = JSONEncoder()
@@ -34,6 +40,28 @@ enum VaultIndexJSON {
             return date
         }
         return decoder
+    }
+
+    /// Encoder for the AI-facing `graph.json` export. Same structure as ``encoder``
+    /// but dates are RFC 3339 with millisecond precision (e.g.
+    /// `2026-06-04T02:52:26.827Z`) so external consumers can parse them with
+    /// standard ISO 8601 libraries. Sub-millisecond precision is dropped, which is
+    /// irrelevant for index/modification timestamps.
+    static var interoperableEncoder: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode(rfc3339MillisecondsFormatter.string(from: date))
+        }
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
+    }
+
+    private static var rfc3339MillisecondsFormatter: ISO8601DateFormatter {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter
     }
 
     private static func iso8601String(from date: Date) -> String {

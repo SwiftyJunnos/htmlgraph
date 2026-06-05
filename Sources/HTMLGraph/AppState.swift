@@ -1,5 +1,6 @@
 import Foundation
 import HTMLGraphCore
+import OSLog
 import SwiftUI
 
 /// A single selection across the sidebar so Inbox and Documents share one
@@ -133,6 +134,8 @@ struct VaultSecurityStore {
 
 @MainActor
 final class AppState: ObservableObject {
+    private static let exportLogger = Logger(subsystem: "com.junnos.htmlgraph", category: "VaultIndexExport")
+
     @Published var vaultURL: URL?
     /// Loopback origin (`http://127.0.0.1:<port>/<token>/`) the current vault is served
     /// from. Documents render from this so third-party web embeds get a real web origin.
@@ -493,9 +496,14 @@ final class AppState: ObservableObject {
             index = builtIndex
             if let vaultURL {
                 // Best-effort: emit the machine-readable graph sidecar for AI tools.
-                // A write failure must never break indexing, so swallow errors and
-                // never touch errorMessage (cleared on success below).
-                _ = try? VaultIndexExporter().export(builtIndex, vaultURL: vaultURL)
+                // A write failure must never break indexing and must not touch
+                // errorMessage (cleared on success below) — just log it so a missing
+                // sidecar is diagnosable.
+                do {
+                    try VaultIndexExporter().export(builtIndex, vaultURL: vaultURL)
+                } catch {
+                    Self.exportLogger.error("graph.json export failed: \(error.localizedDescription, privacy: .public)")
+                }
             }
             if let pendingSelectionId, builtIndex.document(id: pendingSelectionId) != nil {
                 sidebarSelection = .document(pendingSelectionId)
