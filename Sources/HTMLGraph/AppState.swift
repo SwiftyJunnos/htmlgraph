@@ -220,10 +220,15 @@ final class AppState: ObservableObject {
     /// visual editor is deliberately NOT keyed on the document's content hash (so an ordinary
     /// save doesn't reset the caret), so a conflict-reload needs this explicit nudge.
     @Published var visualReloadToken = UUID()
-    /// True between starting (or reloading) a WYSIWYG edit and receiving the editor's first
-    /// snapshot. That first snapshot is the *unedited* DOM, re-serialized by WebKit; we adopt
-    /// it as the buffer's clean reference so formatting-only differences from the on-disk bytes
-    /// don't make an untouched document look edited.
+    /// True only while a WYSIWYG (visual) edit session is live. Gates `updateVisualEditedDocument`
+    /// so a snapshot posted by an outgoing visual editor can't bleed into a buffer that has since
+    /// switched to source editing on the same document (which would overwrite the source view
+    /// with re-serialized HTML).
+    private var visualSessionActive = false
+    /// True between starting (or reloading) a visual session and receiving its first snapshot.
+    /// That first snapshot is the *unedited* DOM, re-serialized by WebKit; we adopt it as the
+    /// buffer's clean reference so formatting-only differences from the on-disk bytes don't make
+    /// an untouched document look edited.
     private var awaitingVisualBaseline = false
 
     private var indexingTask: Task<Void, Never>?
@@ -938,13 +943,19 @@ final class AppState: ObservableObject {
                 baselineMTime: modificationDate(of: fileURL) ?? .distantPast
             )
             editorConflict = nil
-            // The visual editor's first snapshot will (re-)establish the clean reference.
-            awaitingVisualBaseline = true
             return true
         } catch {
             errorMessage = error.localizedDescription
             return false
         }
+    }
+
+    /// Marks the buffer as being edited through the WYSIWYG surface (called by the view after a
+    /// successful `beginEditing` when entering visual mode). Its first snapshot will establish
+    /// the clean reference; only while this is active are visual snapshots applied.
+    func beginVisualSession() {
+        visualSessionActive = true
+        awaitingVisualBaseline = true
     }
 
     /// Mirrors live editor text into the buffer (called from the text view's binding).
@@ -969,7 +980,7 @@ final class AppState: ObservableObject {
     /// editor after the buffer has been re-baselined to a different document is ignored, so a
     /// late debounce can't corrupt the wrong file.
     func updateVisualEditedDocument(documentId: String, bodyInnerHTML: String, fullHTML: String?) {
-        guard let buffer = editorBuffer, buffer.documentId == documentId else { return }
+        guard visualSessionActive, let buffer = editorBuffer, buffer.documentId == documentId else { return }
         let updated: String
         if let spliced = HTMLBodyReplacer.replacingBodyInner(of: buffer.baselineText, with: bodyInnerHTML) {
             updated = spliced
@@ -994,6 +1005,8 @@ final class AppState: ObservableObject {
     func endEditing() {
         editorBuffer = nil
         editorConflict = nil
+        visualSessionActive = false
+        awaitingVisualBaseline = false
     }
 
     /// Resets the buffer's working text back to the last-saved baseline without leaving

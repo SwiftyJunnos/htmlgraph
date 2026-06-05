@@ -128,6 +128,16 @@ final class HTMLBodyReplacerTests: XCTestCase {
         )
     }
 
+    func testCDATAWithEarlyAngleBracketDoesNotExposeFakeBody() {
+        // CDATA (foreign content) ends at ]]>, not the first '>'. A '>' inside the CDATA before
+        // a `<body>` literal must NOT close the section early and expose that fake open tag.
+        let original = "<svg><![CDATA[a > b <body>x]]></svg><html><body>REAL</body></html>"
+        XCTAssertEqual(
+            HTMLBodyReplacer.replacingBodyInner(of: original, with: "NEW"),
+            "<svg><![CDATA[a > b <body>x]]></svg><html><body>NEW</body></html>"
+        )
+    }
+
     func testIgnoresBodyLiteralInsideAnotherTagsAttribute() {
         // <body> embedded in another element's attribute value is not a tag.
         let original = #"<html><head><meta data-tpl="<body>"></head><body>old</body></html>"#

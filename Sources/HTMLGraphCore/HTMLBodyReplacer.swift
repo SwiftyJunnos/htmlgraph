@@ -90,6 +90,12 @@ public enum HTMLBodyReplacer {
     /// being seen as a real tag.
     private static func afterMarkupPrefix(_ c: [Character], _ i: Int) -> Int? {
         if startsWith(c, i, "<!--") { return afterSequence(c, from: i + 4, "-->") }
+        // A CDATA section (real in SVG/MathML foreign content) ends at `]]>`, NOT the first
+        // `>`. Skipping only to `>` would stop early on a `>` in the CDATA text and expose a
+        // `<body>` literal inside it as a fake open tag — corrupting the splice. Over-skipping
+        // a non-foreign `<![CDATA[…` (which HTML treats as a bogus comment) at worst fails to
+        // find a close and returns nil, which is the safe, non-destructive path.
+        if startsWith(c, i, "<![CDATA[") { return afterSequence(c, from: i + 9, "]]>") }
         guard i + 1 < c.count else { return nil }
         if c[i + 1] == "!" || c[i + 1] == "?" { return afterChar(c, from: i + 1, ">") }
         return afterOpaqueElement(c, at: i)

@@ -279,8 +279,7 @@ struct ReaderPane: View {
                 Section("Open Source In…") {
                     ForEach(editors) { editor in
                         Button("Open in \(editor.name)") {
-                            preferredEditorBundleID = editor.bundleID
-                            openWith(editor, absolutePath: absolutePath)
+                            openSourceExternally(editor, absolutePath: absolutePath)
                         }
                     }
                 }
@@ -328,7 +327,12 @@ struct ReaderPane: View {
             // Re-baseline from disk when entering (or swapping into) an edit surface so it
             // loads the just-saved / just-discarded bytes rather than a stale buffer.
             appState.endEditing()
-            editorMode = appState.beginEditing(document) ? target : .read
+            if appState.beginEditing(document) {
+                if target == .visual { appState.beginVisualSession() }
+                editorMode = target
+            } else {
+                editorMode = .read
+            }
         }
     }
 
@@ -593,6 +597,19 @@ struct ReaderPane: View {
     private func openWith(_ editor: ExternalEditor.Editor, absolutePath: String) {
         ExternalEditor.open(URL(fileURLWithPath: absolutePath), with: editor) { message in
             appState.errorMessage = message
+        }
+    }
+
+    /// Opens a document's source in an external editor, but flushes + confirms any unsaved
+    /// in-app edits first so the external editor doesn't load stale on-disk bytes.
+    private func openSourceExternally(_ editor: ExternalEditor.Editor, absolutePath: String) {
+        preferredEditorBundleID = editor.bundleID
+        Task {
+            if editorMode == .visual { await visualBridge.flush() }
+            if editorMode.isEditing, appState.hasUnsavedEdits, !EditorGuard.confirmLeavingEditor(appState) {
+                return
+            }
+            openWith(editor, absolutePath: absolutePath)
         }
     }
 

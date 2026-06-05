@@ -146,6 +146,7 @@ final class EditorSessionTests: XCTestCase {
         let (appState, vaultURL) = try openedVault(files: ["index.html": source])
         let document = try XCTUnwrap(appState.index?.document(id: "index.html"))
         XCTAssertTrue(appState.beginEditing(document))
+        appState.beginVisualSession()
         XCTAssertFalse(appState.hasUnsavedEdits)
 
         // Initial (unedited) snapshot establishes the clean reference; not an edit.
@@ -176,6 +177,7 @@ final class EditorSessionTests: XCTestCase {
         let (appState, _) = try openedVault(files: ["index.html": source])
         let document = try XCTUnwrap(appState.index?.document(id: "index.html"))
         XCTAssertTrue(appState.beginEditing(document))
+        appState.beginVisualSession()
 
         sendVisualBaseline(appState, documentId: "index.html", body: "<p>x</p>")  // normalized form
         XCTAssertFalse(appState.hasUnsavedEdits)  // re-serialization alone is not dirty
@@ -193,6 +195,7 @@ final class EditorSessionTests: XCTestCase {
         let (appState, vaultURL) = try openedVault(files: ["index.html": source])
         let document = try XCTUnwrap(appState.index?.document(id: "index.html"))
         XCTAssertTrue(appState.beginEditing(document))
+        appState.beginVisualSession()
 
         // Initial snapshot: splice can't locate a body, so the clean reference is the full
         // serialization (passed as fullHTML).
@@ -217,8 +220,30 @@ final class EditorSessionTests: XCTestCase {
         let (appState, _) = try openedVault(files: ["index.html": source])
         let document = try XCTUnwrap(appState.index?.document(id: "index.html"))
         XCTAssertTrue(appState.beginEditing(document))
+        appState.beginVisualSession()
 
         appState.updateVisualEditedDocument(documentId: "stale-other.html", bodyInnerHTML: "<p>WRONG</p>", fullHTML: nil)
+        XCTAssertFalse(appState.hasUnsavedEdits)
+        XCTAssertEqual(appState.editorBuffer?.currentText, source)
+    }
+
+    func testVisualSnapshotIgnoredAfterLeavingVisualSession() throws {
+        // Switching visual -> source re-baselines the buffer; a late snapshot from the
+        // outgoing visual editor (same documentId) must NOT overwrite the source buffer with
+        // re-serialized HTML.
+        let source = "<html><head><title>Home</title></head><body><p>a</p></body></html>"
+        let (appState, _) = try openedVault(files: ["index.html": source])
+        let document = try XCTUnwrap(appState.index?.document(id: "index.html"))
+        XCTAssertTrue(appState.beginEditing(document))
+        appState.beginVisualSession()
+
+        // Simulate leaving the visual surface (e.g. switching to source) — endEditing then a
+        // fresh begin, without a new visual session.
+        appState.endEditing()
+        XCTAssertTrue(appState.beginEditing(document))
+
+        // A stale snapshot from the dismantling visual editor is dropped, not applied.
+        appState.updateVisualEditedDocument(documentId: "index.html", bodyInnerHTML: "<p>STALE</p>", fullHTML: nil)
         XCTAssertFalse(appState.hasUnsavedEdits)
         XCTAssertEqual(appState.editorBuffer?.currentText, source)
     }
