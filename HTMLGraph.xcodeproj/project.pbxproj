@@ -37,6 +37,8 @@
 		01000000000000000000020E /* VaultHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000001E /* VaultHTTPServer.swift */; };
 		01000000000000000000020F /* EditorSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000001F /* EditorSession.swift */; };
 		010000000000000000000210 /* DocumentSourceEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000020 /* DocumentSourceEditor.swift */; };
+		010000000000000000000211 /* VisualHTMLEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000022 /* VisualHTMLEditor.swift */; };
+		01000000000000000000010F /* HTMLBodyReplacer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000021 /* HTMLBodyReplacer.swift */; };
 		010000000000000000000301 /* HTMLGraphCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 010000000000000000000502 /* HTMLGraphCore.framework */; };
 		010000000000000000000302 /* HTMLGraphCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 010000000000000000000502 /* HTMLGraphCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		01000000000000000000030A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000032 /* Assets.xcassets */; };
@@ -96,6 +98,8 @@
 		01000000000000000000001E /* VaultHTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultHTTPServer.swift; sourceTree = "<group>"; };
 		01000000000000000000001F /* EditorSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorSession.swift; sourceTree = "<group>"; };
 		010000000000000000000020 /* DocumentSourceEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentSourceEditor.swift; sourceTree = "<group>"; };
+		010000000000000000000021 /* HTMLBodyReplacer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTMLBodyReplacer.swift; sourceTree = "<group>"; };
+		010000000000000000000022 /* VisualHTMLEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualHTMLEditor.swift; sourceTree = "<group>"; };
 		010000000000000000000031 /* HTMLGraph.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HTMLGraph.entitlements; sourceTree = "<group>"; };
 		010000000000000000000032 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		010000000000000000000033 /* AppIcon.svg */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = AppIcon.svg; sourceTree = "<group>"; };
@@ -151,6 +155,7 @@
 			children = (
 				010000000000000000000001 /* DocumentNode.swift */,
 				010000000000000000000002 /* HTMLMetadataExtractor.swift */,
+				010000000000000000000021 /* HTMLBodyReplacer.swift */,
 				01000000000000000000000A /* InboxAccepter.swift */,
 				01000000000000000000000B /* InboxItem.swift */,
 				01000000000000000000000C /* InboxScanner.swift */,
@@ -229,6 +234,7 @@
 				01000000000000000000001B /* HTMLDocumentWebView.swift */,
 				01000000000000000000001C /* VaultResourceSchemeHandler.swift */,
 				01000000000000000000001E /* VaultHTTPServer.swift */,
+				010000000000000000000022 /* VisualHTMLEditor.swift */,
 			);
 			path = Web;
 			sourceTree = "<group>";
@@ -346,6 +352,7 @@
 				01000000000000000000020E /* VaultHTTPServer.swift in Sources */,
 				01000000000000000000020F /* EditorSession.swift in Sources */,
 				010000000000000000000210 /* DocumentSourceEditor.swift in Sources */,
+				010000000000000000000211 /* VisualHTMLEditor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -366,6 +373,7 @@
 				010000000000000000000108 /* VaultSecurityPolicy.swift in Sources */,
 				01000000000000000000010D /* VaultIndexJSON.swift in Sources */,
 				01000000000000000000010E /* VaultIndexExporter.swift in Sources */,
+				01000000000000000000010F /* HTMLBodyReplacer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

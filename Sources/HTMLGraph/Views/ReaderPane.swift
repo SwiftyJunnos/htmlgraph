@@ -29,10 +29,16 @@ enum WebViewIdentity {
     }
 }
 
-/// Whether the document pane is showing the rendered preview or the editable HTML source.
+/// How the document pane is presenting the current document.
 enum EditorMode {
+    /// Rendered, read-only preview.
     case read
-    case edit
+    /// Rendered preview made editable in place (WYSIWYG) — edit the content, not the markup.
+    case visual
+    /// The raw HTML source in a plain-text editor, for precise markup edits.
+    case source
+
+    var isEditing: Bool { self != .read }
 }
 
 struct ReaderPane: View {
@@ -47,6 +53,10 @@ struct ReaderPane: View {
     /// Guards against re-entrancy when we programmatically revert a selection change the
     /// user cancelled out of (reverting re-fires `onChange`).
     @State private var isRevertingSelection = false
+    /// Lets the host pull the WYSIWYG editor's live DOM before a save or before leaving, so a
+    /// synchronous save never writes a stale (debounced) buffer. One per pane; the active
+    /// visual editor registers itself.
+    @State private var visualBridge = VisualEditorBridge()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -119,9 +129,17 @@ struct ReaderPane: View {
             } else if let document = appState.selectedDocument {
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(document.title)
-                            .font(.headline)
-                            .lineLimit(1)
+                        HStack(spacing: 6) {
+                            Text(document.title)
+                                .font(.headline)
+                                .lineLimit(1)
+                            // The macOS document convention for unsaved changes — a quiet
+                            // "Edited" beside the title, rather than a colored badge.
+                            if editorMode.isEditing, appState.hasUnsavedEdits {
+                                Text("Edited")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                         Text(document.path)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -130,23 +148,23 @@ struct ReaderPane: View {
 
                     Spacer()
 
+                    if editorMode.isEditing {
+                        Button("Save") {
+                            Task {
+                                if editorMode == .visual { await visualBridge.flush() }
+                                appState.saveEditorBuffer()
+                            }
+                        }
+                        .keyboardShortcut("s", modifiers: .command)
+                        .disabled(!appState.hasUnsavedEdits)
+                        .help("Save changes to this document (⌘S).")
+                    }
                     modeButton(for: document)
-                    externalActionsMenu(absolutePath: document.absolutePath)
+                    externalActionsMenu(for: document)
                 }
                 .padding()
-                // First of three coordinated Editor-mode cues: the header strip washes a
-                // faint accent so the mode change is *felt*, not a silent pane swap.
-                .background(editorMode == .edit ? Color.accentColor.opacity(0.06) : Color.clear)
-                .animation(.easeInOut(duration: 0.15), value: editorMode)
 
-                // Second cue: the plain divider becomes a 2pt accent rule while editing.
-                if editorMode == .edit {
-                    Rectangle()
-                        .fill(Color.accentColor)
-                        .frame(height: 2)
-                } else {
-                    Divider()
-                }
+                Divider()
 
                 documentContent(for: document)
             } else {
@@ -213,43 +231,55 @@ struct ReaderPane: View {
     // MARK: - Editor mode
 
     /// The in-app mode toggle: a single button labelled by its ACTION (never the current
-    /// state), so it always says what a click does — "Edit Source" while reading, "Done"
-    /// while editing. State legibility is carried by the environment (header wash, accent
-    /// rule, status bar), not this button, so it stays calm and bordered. ⌘↩ toggles it.
+    /// state), so it always says what a click does — "Edit" while reading, "Done" while
+    /// editing. The primary action enters *visual* (WYSIWYG) editing — editing the rendered
+    /// content directly is the common case; the raw-HTML source surface lives one click away
+    /// in the actions menu. State legibility is carried by the environment (header wash,
+    /// accent rule, status bar), not this button, so it stays calm and bordered. ⌘↩ toggles.
     private func modeButton(for document: DocumentNode) -> some View {
         Button {
-            toggleEditMode()
+            Task { await togglePrimaryEdit(for: document) }
         } label: {
-            if editorMode == .edit {
+            if editorMode.isEditing {
                 Label("Done", systemImage: "checkmark")
             } else {
-                Label("Edit Source", systemImage: "chevron.left.forwardslash.chevron.right")
+                Label("Edit", systemImage: "pencil")
             }
         }
         .buttonStyle(.bordered)
         // ⌘↩ ("commit") rather than ⌘E — ⌘E is the system "Use Selection for Find" action
         // inside the source NSTextView, and shadowing it while editing would surprise users.
         .keyboardShortcut(.return, modifiers: .command)
-        .help(editorMode == .edit
+        .help(editorMode.isEditing
             ? "Finish editing and return to the rendered view (⌘↩)."
-            : "Edit this document’s HTML source in-app (⌘↩).")
+            : "Edit this document’s content in place (⌘↩).")
     }
 
-    /// External-editor and Finder actions, kept as a separate momentary-action menu so they
-    /// never hide behind the stateful mode toggle (the old split button conflated the two).
-    /// A quiet ellipsis menu, visible in both modes, so the heavier "edit in a real editor"
-    /// path stays one permanent click away.
-    private func externalActionsMenu(absolutePath: String) -> some View {
+    /// Secondary actions, kept as a separate momentary-action menu so they never hide behind
+    /// the stateful mode toggle. Houses the choice of in-app edit surface — visual (the
+    /// primary button's default) vs. raw HTML source for precise markup edits — plus the
+    /// heavier "edit in a real editor" / Finder paths. Visible in every mode.
+    private func externalActionsMenu(for document: DocumentNode) -> some View {
         let editors = ExternalEditor.installedEditors()
+        let absolutePath = document.absolutePath
         return Menu {
-            if editors.isEmpty {
-                Text("No supported editor found")
-            } else {
+            Section("Edit In-App") {
+                Button {
+                    Task { await setMode(.visual, for: document) }
+                } label: {
+                    Label("Edit Content (Visual)", systemImage: editorMode == .visual ? "checkmark" : "pencil")
+                }
+                Button {
+                    Task { await setMode(.source, for: document) }
+                } label: {
+                    Label("Edit HTML Source", systemImage: editorMode == .source ? "checkmark" : "chevron.left.forwardslash.chevron.right")
+                }
+            }
+            if !editors.isEmpty {
                 Section("Open Source In…") {
                     ForEach(editors) { editor in
                         Button("Open in \(editor.name)") {
-                            preferredEditorBundleID = editor.bundleID
-                            openWith(editor, absolutePath: absolutePath)
+                            openSourceExternally(editor, absolutePath: absolutePath)
                         }
                     }
                 }
@@ -265,117 +295,109 @@ struct ReaderPane: View {
         .buttonStyle(.borderless)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Open the HTML source in an external editor, or reveal it in Finder.")
+        .help("Choose the in-app edit surface, open the HTML source in an external editor, or reveal it in Finder.")
         .accessibilityLabel("Document actions")
     }
 
-    /// Third Editor-mode cue, and the new home of the save state. A persistent bottom bar
-    /// (Editor mode only) replacing the header Save button: its fixed presence ends the
-    /// appear/disappear layout shift and gives an always-visible saved / unsaved / conflict
-    /// readout. ⌘S still saves (from the inline Save button while dirty).
-    private func editorStatusBar(for document: DocumentNode) -> some View {
-        HStack(spacing: 8) {
-            if appState.editorConflict != nil {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                Text("Conflict — resolve to continue")
-                    .foregroundStyle(.secondary)
-            } else if appState.hasUnsavedEdits {
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 7))
-                    .foregroundStyle(.orange)
-                Text("Unsaved")
-                    .foregroundStyle(.secondary)
-                Button("Save") { appState.saveEditorBuffer() }
-                    .controlSize(.small)
-                    .keyboardShortcut("s", modifiers: .command)
-                    .help("Save changes to this document (⌘S).")
-            } else {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.secondary)
-                Text("Saved")
-                    .foregroundStyle(.secondary)
-                if let savedAt = appState.editorBuffer?.baselineMTime {
-                    Text(savedAt, style: .time)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-
-            Spacer()
-
-            Text(document.path)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-        }
-        .font(.caption)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-        .background(.thinMaterial)
+    /// The primary mode button: read → visual (the common case), and any edit mode → read.
+    private func togglePrimaryEdit(for document: DocumentNode) async {
+        await setMode(editorMode == .read ? .visual : .read, for: document)
     }
 
-    private func toggleEditMode() {
-        if editorMode == .edit {
-            exitEditMode()
-        } else {
-            enterEditMode()
+    /// Switches the document pane between read / visual / source. Every transition that
+    /// leaves or swaps an edit surface routes through the unsaved-edits guard first, so no
+    /// path can silently drop unsaved text; a clean buffer makes the guard a no-op. Leaving
+    /// the visual editor first flushes its live DOM into the buffer (the web view is still
+    /// alive here, since WE trigger its teardown by changing the mode), so the guard's save
+    /// reflects the latest keystrokes rather than the last debounce.
+    private func setMode(_ target: EditorMode, for document: DocumentNode) async {
+        guard editorMode != target else { return }
+        if editorMode == .visual {
+            await visualBridge.flush()
+        }
+        if editorMode.isEditing, appState.hasUnsavedEdits, !EditorGuard.confirmLeavingEditor(appState) {
+            // Cancelled, or a conflict that must be resolved first — stay put.
+            return
+        }
+        switch target {
+        case .read:
+            appState.endEditing()
+            editorMode = .read
+        case .visual, .source:
+            // Re-baseline from disk when entering (or swapping into) an edit surface so it
+            // loads the just-saved / just-discarded bytes rather than a stale buffer.
+            appState.endEditing()
+            if appState.beginEditing(document) {
+                if target == .visual { appState.beginVisualSession() }
+                editorMode = target
+            } else {
+                editorMode = .read
+            }
         }
     }
 
     @ViewBuilder
     private func documentContent(for document: DocumentNode) -> some View {
-        if editorMode == .edit {
-            VStack(spacing: 0) {
-                DocumentSourceEditor(
-                    text: Binding(
-                        get: { appState.editorBuffer?.currentText ?? "" },
-                        set: { appState.updateEditorText($0) }
-                    ),
-                    isEditable: true,
-                    accentTinted: true
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                Divider()
-                editorStatusBar(for: document)
-            }
-        } else if let vaultURL = appState.vaultURL {
-            if let baseURL = appState.vaultBaseURL {
-                documentWebView(
-                    documentURL: URL(fileURLWithPath: document.absolutePath),
-                    identity: webViewIdentity(for: document, vaultURL: vaultURL),
-                    vaultURL: vaultURL,
-                    baseURL: baseURL
-                )
-            } else {
-                preparingPreview
-            }
-        } else {
-            ContentUnavailableView(
-                "No vault selected",
-                systemImage: "folder",
-                description: Text("Choose a local HTML folder to render this document.")
+        switch editorMode {
+        case .source:
+            DocumentSourceEditor(
+                text: Binding(
+                    get: { appState.editorBuffer?.currentText ?? "" },
+                    set: { appState.updateEditorText($0) }
+                ),
+                isEditable: true
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .visual:
+            if let vaultURL = appState.vaultURL {
+                if let baseURL = appState.vaultBaseURL {
+                    VisualHTMLEditor(
+                        documentId: document.id,
+                        documentURL: URL(fileURLWithPath: document.absolutePath),
+                        vaultURL: vaultURL,
+                        baseURL: baseURL,
+                        allowsNetworkAccess: appState.allowsNetworkAccess,
+                        bridge: visualBridge,
+                        onSnapshot: { documentId, body, full in
+                            appState.updateVisualEditedDocument(
+                                documentId: documentId, bodyInnerHTML: body, fullHTML: full
+                            )
+                        },
+                        onNavigationError: { appState.errorMessage = $0 }
+                    )
+                    .id(visualWebViewIdentity(for: document, vaultURL: vaultURL))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    preparingPreview
+                }
+            } else {
+                noVaultPlaceholder
+            }
+        case .read:
+            if let vaultURL = appState.vaultURL {
+                if let baseURL = appState.vaultBaseURL {
+                    documentWebView(
+                        documentURL: URL(fileURLWithPath: document.absolutePath),
+                        identity: webViewIdentity(for: document, vaultURL: vaultURL),
+                        vaultURL: vaultURL,
+                        baseURL: baseURL
+                    )
+                } else {
+                    preparingPreview
+                }
+            } else {
+                noVaultPlaceholder
+            }
         }
     }
 
-    private func enterEditMode() {
-        guard editorMode != .edit, let document = appState.selectedDocument else { return }
-        if appState.beginEditing(document) {
-            editorMode = .edit
-        }
-    }
-
-    private func exitEditMode() {
-        guard editorMode != .read else { return }
-        // confirmLeavingEditor returns false to abort (user cancelled, or a conflict needs
-        // resolving first) — stay in Edit so the buffer isn't lost.
-        if appState.hasUnsavedEdits, !EditorGuard.confirmLeavingEditor(appState) {
-            return
-        }
-        appState.endEditing()
-        editorMode = .read
+    private var noVaultPlaceholder: some View {
+        ContentUnavailableView(
+            "No vault selected",
+            systemImage: "folder",
+            description: Text("Choose a local HTML folder to render this document.")
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func handleSelectionChange(from oldValue: SidebarSelection?, to newValue: SidebarSelection?) {
@@ -383,16 +405,30 @@ struct ReaderPane: View {
             isRevertingSelection = false
             return
         }
-        guard editorMode == .edit else { return }
+        guard editorMode.isEditing else { return }
 
-        if appState.hasUnsavedEdits, !EditorGuard.confirmLeavingEditor(appState) {
-            // Cancelled or unresolved conflict — put the selection back where it was.
-            isRevertingSelection = true
-            appState.sidebarSelection = oldValue
-            return
+        if editorMode == .visual {
+            // The outgoing visual editor has already been swapped out of the view by the time
+            // this runs, so we can't pull its DOM directly; instead it fired a final snapshot
+            // on `blur` (focus left for the sidebar). Defer the guard one runloop tick so that
+            // snapshot is delivered into the buffer before we read hasUnsavedEdits — otherwise
+            // the very last keystrokes could be missed. (Leading-edge dirty marking guarantees
+            // an edited document is never mistaken for a clean one and silently switched.)
+            DispatchQueue.main.async { resolveLeaveForSelectionChange(from: oldValue) }
+        } else {
+            resolveLeaveForSelectionChange(from: oldValue)
         }
-        appState.endEditing()
-        editorMode = .read
+
+        func resolveLeaveForSelectionChange(from oldValue: SidebarSelection?) {
+            if appState.hasUnsavedEdits, !EditorGuard.confirmLeavingEditor(appState) {
+                // Cancelled or unresolved conflict — put the selection back where it was.
+                isRevertingSelection = true
+                appState.sidebarSelection = oldValue
+                return
+            }
+            appState.endEditing()
+            editorMode = .read
+        }
     }
 
     private func documentWebView(documentURL: URL, identity: String, vaultURL: URL, baseURL: URL) -> some View {
@@ -453,6 +489,9 @@ struct ReaderPane: View {
             Spacer(minLength: 16)
 
             Button("Allow Network") {
+                // Safe for a live visual edit: its web view identity no longer keys on the
+                // network policy, so enabling network won't rebuild/reload it (the rules
+                // refresh on the next load). The reader rebuilds correctly.
                 appState.enableNetworkAccess()
             }
             .buttonStyle(.borderedProminent)
@@ -561,6 +600,19 @@ struct ReaderPane: View {
         }
     }
 
+    /// Opens a document's source in an external editor, but flushes + confirms any unsaved
+    /// in-app edits first so the external editor doesn't load stale on-disk bytes.
+    private func openSourceExternally(_ editor: ExternalEditor.Editor, absolutePath: String) {
+        preferredEditorBundleID = editor.bundleID
+        Task {
+            if editorMode == .visual { await visualBridge.flush() }
+            if editorMode.isEditing, appState.hasUnsavedEdits, !EditorGuard.confirmLeavingEditor(appState) {
+                return
+            }
+            openWith(editor, absolutePath: absolutePath)
+        }
+    }
+
     private func webViewIdentity(for document: DocumentNode, vaultURL: URL) -> String {
         WebViewIdentity.make(
             vaultPath: vaultURL.standardizedFileURL.path,
@@ -581,6 +633,24 @@ struct ReaderPane: View {
             contentHash: item.contentHash,
             trustMode: appState.trustMode,
             allowsNetworkAccess: appState.allowsNetworkAccess
+        )
+    }
+
+    /// Identity for the WYSIWYG editor's web view. Deliberately minimal — it rebuilds only on
+    /// a document change or an explicit reload (conflict-reload token), never on a save (which
+    /// would reset the caret/scroll) and never on a security-policy flip. Unlike the reader,
+    /// the visual editor ALWAYS runs with page JS disabled regardless of trust, and its
+    /// network content rules are installed in the coordinator at build time (not via this id),
+    /// so a Safe↔Trusted or network toggle must NOT tear down a live edit (doing so reloads
+    /// disk and drops in-progress edits). A mid-edit network change therefore keeps the
+    /// editor's build-time content rules until the next load — acceptable because page JS is
+    /// off, and the reader re-applies the policy on save.
+    private func visualWebViewIdentity(for document: DocumentNode, vaultURL: URL) -> String {
+        WebViewIdentity.make(
+            vaultPath: vaultURL.standardizedFileURL.path,
+            contentId: "visual|\(document.id)|\(appState.visualReloadToken.uuidString)",
+            trustMode: .safe,
+            allowsNetworkAccess: false
         )
     }
 }
