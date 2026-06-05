@@ -102,10 +102,14 @@ struct ContentView: View {
     }
 
     private func chooseVault() {
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
         appState.chooseAndOpenVault()
     }
 
     private func acceptInboxItem(_ item: InboxItem) {
+        // Accepting reopens the vault (a full reindex that clears the editor buffer), so
+        // confirm any unsaved edits before the destination picker takes over.
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
         guard let vaultURL = appState.vaultURL,
               let destinationURL = InboxDestinationPicker.chooseDestination(for: item, vaultURL: vaultURL) else {
             return

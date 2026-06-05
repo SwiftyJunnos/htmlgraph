@@ -177,7 +177,7 @@ private func documentContextMenu(_ document: DocumentNode, appState: AppState) -
         Button("As HTML Link") { SidebarCommands.copyToPasteboard(SidebarCommands.htmlLink(for: document)) }
     }
     Divider()
-    Button("Duplicate") { appState.duplicateDocument(document) }
+    Button("Duplicate") { SidebarActions.duplicate(document, appState: appState) }
     let currentFolder = (document.path as NSString).deletingLastPathComponent
     Menu("Move to") {
         // Same items for every document so the menu shape doesn't depend on where the
@@ -199,11 +199,11 @@ private func documentContextMenu(_ document: DocumentNode, appState: AppState) -
 
 @ViewBuilder @MainActor
 private func inboxContextMenu(_ item: InboxItem, appState: AppState) -> some View {
-    Button("Add to Vault") { appState.addToVault(item, folder: nil) }
+    Button("Add to Vault") { SidebarActions.addToVault(item, folder: nil, appState: appState) }
     if !appState.moveTargetFolders.isEmpty {
         Menu("File Into") {
             ForEach(appState.moveTargetFolders, id: \.self) { folder in
-                Button(folder) { appState.addToVault(item, folder: folder) }
+                Button(folder) { SidebarActions.addToVault(item, folder: folder, appState: appState) }
             }
         }
     }
@@ -224,6 +224,7 @@ private func inboxContextMenu(_ item: InboxItem, appState: AppState) -> some Vie
 @MainActor
 enum SidebarActions {
     static func newDocument(inFolder folder: String?, appState: AppState) {
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
         let location = folder.map { "in “\($0)”" } ?? "in the vault root"
         guard let name = SidebarCommands.promptForName(
             title: "New Document",
@@ -235,6 +236,7 @@ enum SidebarActions {
     }
 
     static func newFolder(inParent parent: String?, appState: AppState) {
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
         let location = parent.map { "inside “\($0)”" } ?? "in the vault root"
         guard let name = SidebarCommands.promptForName(
             title: "New Folder",
@@ -245,7 +247,13 @@ enum SidebarActions {
         appState.createFolder(named: name, inParent: parent)
     }
 
+    static func duplicate(_ document: DocumentNode, appState: AppState) {
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
+        appState.duplicateDocument(document)
+    }
+
     static func rename(_ document: DocumentNode, appState: AppState) {
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
         let count = appState.backlinkCount(forDocument: document.id)
         let warning = count > 0
             ? "\n\n⚠️ \(count) \(documentsWord(count)) link to this file. Renaming it will break those links."
@@ -260,6 +268,7 @@ enum SidebarActions {
     }
 
     static func move(_ document: DocumentNode, to folder: String?, appState: AppState) {
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
         let count = appState.backlinkCount(forDocument: document.id)
         if count > 0 {
             let destination = folder ?? "the vault root"
@@ -273,6 +282,7 @@ enum SidebarActions {
     }
 
     static func delete(_ document: DocumentNode, appState: AppState) {
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
         let count = appState.backlinkCount(forDocument: document.id)
         let extra = count > 0
             ? " \(count) \(documentsWord(count)) link to it — those links will break."
@@ -283,6 +293,16 @@ enum SidebarActions {
             confirmTitle: "Move to Trash"
         ) else { return }
         appState.trashDocument(document)
+    }
+
+    /// Files an unfiled inbox item into the vault. Guarded because `addToVault` accepts the
+    /// item and reopens the vault (`acceptInboxItem` → `openVault` → `beginSession`), a full
+    /// reindex that clears `editorBuffer` — so an open, unsaved editor must be confirmed
+    /// first. Inbox menus can fire without changing the sidebar selection, so the
+    /// selection-change guard doesn't cover them.
+    static func addToVault(_ item: InboxItem, folder: String?, appState: AppState) {
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
+        appState.addToVault(item, folder: folder)
     }
 
     static func deleteInbox(_ item: InboxItem, appState: AppState) {
