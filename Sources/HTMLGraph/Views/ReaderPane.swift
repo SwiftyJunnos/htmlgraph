@@ -69,13 +69,13 @@ struct ReaderPane: View {
 
                     Menu("Add to Vault") {
                         Button("Vault Root") {
-                            appState.addToVault(item, folder: nil)
+                            SidebarActions.addToVault(item, folder: nil, appState: appState)
                         }
                         if !appState.vaultFolders.isEmpty {
                             Divider()
                             ForEach(appState.vaultFolders, id: \.self) { folder in
                                 Button(folder) {
-                                    appState.addToVault(item, folder: folder)
+                                    SidebarActions.addToVault(item, folder: folder, appState: appState)
                                 }
                             }
                         }
@@ -84,7 +84,7 @@ struct ReaderPane: View {
                             onAcceptInboxItem(item)
                         }
                     } primaryAction: {
-                        appState.addToVault(item, folder: nil)
+                        SidebarActions.addToVault(item, folder: nil, appState: appState)
                     }
                     .menuStyle(.button)
                     .buttonStyle(.borderedProminent)

@@ -199,11 +199,11 @@ private func documentContextMenu(_ document: DocumentNode, appState: AppState) -
 
 @ViewBuilder @MainActor
 private func inboxContextMenu(_ item: InboxItem, appState: AppState) -> some View {
-    Button("Add to Vault") { appState.addToVault(item, folder: nil) }
+    Button("Add to Vault") { SidebarActions.addToVault(item, folder: nil, appState: appState) }
     if !appState.moveTargetFolders.isEmpty {
         Menu("File Into") {
             ForEach(appState.moveTargetFolders, id: \.self) { folder in
-                Button(folder) { appState.addToVault(item, folder: folder) }
+                Button(folder) { SidebarActions.addToVault(item, folder: folder, appState: appState) }
             }
         }
     }
@@ -293,6 +293,16 @@ enum SidebarActions {
             confirmTitle: "Move to Trash"
         ) else { return }
         appState.trashDocument(document)
+    }
+
+    /// Files an unfiled inbox item into the vault. Guarded because `addToVault` accepts the
+    /// item and reopens the vault (`acceptInboxItem` → `openVault` → `beginSession`), a full
+    /// reindex that clears `editorBuffer` — so an open, unsaved editor must be confirmed
+    /// first. Inbox menus can fire without changing the sidebar selection, so the
+    /// selection-change guard doesn't cover them.
+    static func addToVault(_ item: InboxItem, folder: String?, appState: AppState) {
+        guard EditorGuard.confirmLeavingEditor(appState) else { return }
+        appState.addToVault(item, folder: folder)
     }
 
     static func deleteInbox(_ item: InboxItem, appState: AppState) {

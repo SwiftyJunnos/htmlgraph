@@ -149,6 +149,19 @@ always fails; loosen it wrong and it stops catching drift).
 
 ### Phase 2 — EditorSession + manual save path (incremental apply, no view destruction)
 
+> **⚠️ Superseded by the shipped implementation (PR #5).** The design below sketches a
+> standalone `@MainActor ObservableObject EditorSession` owned by `ReaderPane` (with
+> `seed()` / `markSavedNow()` and an `AppState.saveDocumentEdits(id:newText:)`). The code
+> that shipped keeps the *strategy* (synchronous, `beginSession`-free incremental apply;
+> the hash-parity and `contentHash`-in-identity notes below all still hold) but uses a
+> different shape: editor state is **plain value structs** — `EditorBuffer` and
+> `EditorConflict` — held directly on `AppState` as `@Published` properties (not an
+> `ObservableObject`, not view-owned). The lifecycle methods live on `AppState`
+> (`beginEditing` / `updateEditorText` / `saveEditorBuffer` / `endEditing` /
+> `discardEditorChanges` / `resolveConflictBy…`), and leave/quit confirmation is a separate
+> `@MainActor enum EditorGuard.confirmLeavingEditor(_:)`. See `Sources/HTMLGraph/EditorSession.swift`
+> and the "In-app source editing" section of `AppState.swift` for the authoritative design.
+
 **Goal:** dirty tracking, atomic write, and incremental index apply done **synchronously
 on the main actor** so we bypass `beginSession` → selection / scroll / preview stay put.
 
