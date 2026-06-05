@@ -7,6 +7,9 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 
+# Exported graph sidecar written into vaults at index time (e.g. Fixtures during QA)
+.htmlgraph/
+
 # Signing material — never commit certificates, requests, or private keys
 *.cer
 *.csr

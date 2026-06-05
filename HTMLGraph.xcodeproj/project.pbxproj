@@ -15,6 +15,8 @@
 		010000000000000000000106 /* VaultIndexCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000006 /* VaultIndexCache.swift */; };
 		010000000000000000000107 /* VaultIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000007 /* VaultIndexer.swift */; };
 		010000000000000000000108 /* VaultSecurityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000008 /* VaultSecurityPolicy.swift */; };
+		01000000000000000000010D /* VaultIndexJSON.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000009 /* VaultIndexJSON.swift */; };
+		01000000000000000000010E /* VaultIndexExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000D /* VaultIndexExporter.swift */; };
 		01000000000000000000010A /* InboxAccepter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000A /* InboxAccepter.swift */; };
 		01000000000000000000010B /* InboxItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000B /* InboxItem.swift */; };
 		01000000000000000000010C /* InboxScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000C /* InboxScanner.swift */; };
@@ -71,6 +73,8 @@
 		010000000000000000000006 /* VaultIndexCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultIndexCache.swift; sourceTree = "<group>"; };
 		010000000000000000000007 /* VaultIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultIndexer.swift; sourceTree = "<group>"; };
 		010000000000000000000008 /* VaultSecurityPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultSecurityPolicy.swift; sourceTree = "<group>"; };
+		010000000000000000000009 /* VaultIndexJSON.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultIndexJSON.swift; sourceTree = "<group>"; };
+		01000000000000000000000D /* VaultIndexExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultIndexExporter.swift; sourceTree = "<group>"; };
 		01000000000000000000000A /* InboxAccepter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxAccepter.swift; sourceTree = "<group>"; };
 		01000000000000000000000B /* InboxItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxItem.swift; sourceTree = "<group>"; };
 		01000000000000000000000C /* InboxScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxScanner.swift; sourceTree = "<group>"; };
@@ -152,6 +156,8 @@
 				010000000000000000000006 /* VaultIndexCache.swift */,
 				010000000000000000000007 /* VaultIndexer.swift */,
 				010000000000000000000008 /* VaultSecurityPolicy.swift */,
+				010000000000000000000009 /* VaultIndexJSON.swift */,
+				01000000000000000000000D /* VaultIndexExporter.swift */,
 			);
 			path = HTMLGraphCore;
 			sourceTree = "<group>";
@@ -350,6 +356,8 @@
 				010000000000000000000106 /* VaultIndexCache.swift in Sources */,
 				010000000000000000000107 /* VaultIndexer.swift in Sources */,
 				010000000000000000000108 /* VaultSecurityPolicy.swift in Sources */,
+				01000000000000000000010D /* VaultIndexJSON.swift in Sources */,
+				01000000000000000000010E /* VaultIndexExporter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

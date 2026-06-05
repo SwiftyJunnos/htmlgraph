@@ -154,6 +154,27 @@ final class VaultIndexerTests: XCTestCase {
         } ?? false)
     }
 
+    func testExportedSidecarIsNotIndexedAsDocument() throws {
+        let vaultURL = try makeTemporaryVault(files: [
+            "index.html": """
+            <!doctype html>
+            <html><head><title>Home</title></head><body></body></html>
+            """
+        ])
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
+
+        let initial = try VaultIndexer().indexVault(at: vaultURL)
+        XCTAssertEqual(initial.documents.map(\.id), ["index.html"])
+
+        // Writing the AI sidecar must not feed back into the graph: the
+        // hidden `.htmlgraph/` dir is skipped and graph.json is not HTML.
+        try VaultIndexExporter().export(initial, vaultURL: vaultURL)
+
+        let reindexed = try VaultIndexer().indexVault(at: vaultURL)
+        XCTAssertEqual(reindexed.documents.map(\.id), ["index.html"])
+        XCTAssertFalse(reindexed.documents.contains { $0.id.contains(".htmlgraph") })
+    }
+
     private func makeTemporaryVault(files: [String: String]) throws -> URL {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("HTMLGraphTests-\(UUID().uuidString)", isDirectory: true)
