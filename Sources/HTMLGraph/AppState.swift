@@ -491,6 +491,12 @@ final class AppState: ObservableObject {
         switch result {
         case .success(let builtIndex):
             index = builtIndex
+            if let vaultURL {
+                // Best-effort: emit the machine-readable graph sidecar for AI tools.
+                // A write failure must never break indexing, so swallow errors and
+                // never touch errorMessage (cleared on success below).
+                _ = try? VaultIndexExporter().export(builtIndex, vaultURL: vaultURL)
+            }
             if let pendingSelectionId, builtIndex.document(id: pendingSelectionId) != nil {
                 sidebarSelection = .document(pendingSelectionId)
             } else {
