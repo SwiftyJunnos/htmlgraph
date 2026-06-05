@@ -216,6 +216,15 @@ final class AppState: ObservableObject {
     /// Set when a save found the file changed on disk since it was opened; drives the
     /// Overwrite / Reload / Cancel conflict alert.
     @Published var editorConflict: EditorConflict?
+    /// Bumped to force the WYSIWYG editor's web view to rebuild and reload from disk — the
+    /// visual editor is deliberately NOT keyed on the document's content hash (so an ordinary
+    /// save doesn't reset the caret), so a conflict-reload needs this explicit nudge.
+    @Published var visualReloadToken = UUID()
+    /// True between starting (or reloading) a WYSIWYG edit and receiving the editor's first
+    /// snapshot. That first snapshot is the *unedited* DOM, re-serialized by WebKit; we adopt
+    /// it as the buffer's clean reference so formatting-only differences from the on-disk bytes
+    /// don't make an untouched document look edited.
+    private var awaitingVisualBaseline = false
 
     private var indexingTask: Task<Void, Never>?
     private var inboxPollingTask: Task<Void, Never>?
@@ -929,6 +938,8 @@ final class AppState: ObservableObject {
                 baselineMTime: modificationDate(of: fileURL) ?? .distantPast
             )
             editorConflict = nil
+            // The visual editor's first snapshot will (re-)establish the clean reference.
+            awaitingVisualBaseline = true
             return true
         } catch {
             errorMessage = error.localizedDescription
@@ -942,6 +953,42 @@ final class AppState: ObservableObject {
         editorBuffer?.currentText = text
     }
 
+    /// Mirrors the WYSIWYG editor's live DOM into the buffer as a full source document. The
+    /// whole save / dirty / conflict pipeline is keyed on `editorBuffer.currentText`, so this
+    /// is all the visual editor needs to plug into it: ⌘S, the unsaved-edits guard, and
+    /// conflict detection then work unchanged.
+    ///
+    /// Preferred path: splice the edited body back into the ORIGINAL source, preserving the
+    /// doctype/head/body-tag byte-for-byte. If the body region can't be located safely
+    /// (implied body, or `<body>` only inside comments/scripts), fall back to the DOM's full
+    /// serialization — that reformats the whole document but, crucially, NEVER drops content.
+    /// Writing the bare body fragment here would silently destroy the head/doctype, so it is
+    /// deliberately not a fallback.
+    ///
+    /// `documentId` is the editor's own document; a stale snapshot posted by an outgoing
+    /// editor after the buffer has been re-baselined to a different document is ignored, so a
+    /// late debounce can't corrupt the wrong file.
+    func updateVisualEditedDocument(documentId: String, bodyInnerHTML: String, fullHTML: String?) {
+        guard let buffer = editorBuffer, buffer.documentId == documentId else { return }
+        let updated: String
+        if let spliced = HTMLBodyReplacer.replacingBodyInner(of: buffer.baselineText, with: bodyInnerHTML) {
+            updated = spliced
+        } else if let fullHTML {
+            updated = fullHTML
+        } else {
+            return  // no safe whole-document representation available — don't touch the file
+        }
+        if awaitingVisualBaseline {
+            // First snapshot of this session is the unedited DOM — adopt it as the clean
+            // reference so re-serialization alone never reads as an edit.
+            awaitingVisualBaseline = false
+            editorBuffer?.currentText = updated
+            editorBuffer?.cleanText = updated
+        } else if updated != buffer.currentText {
+            editorBuffer?.currentText = updated
+        }
+    }
+
     /// Drops the editor buffer (and any pending conflict). Called when leaving Edit mode
     /// or after the user discards changes.
     func endEditing() {
@@ -953,13 +1000,7 @@ final class AppState: ObservableObject {
     /// the editor.
     func discardEditorChanges() {
         guard let buffer = editorBuffer else { return }
-        editorBuffer = EditorBuffer(
-            documentId: buffer.documentId,
-            baselineText: buffer.baselineText,
-            currentText: buffer.baselineText,
-            baselineHash: buffer.baselineHash,
-            baselineMTime: buffer.baselineMTime
-        )
+        editorBuffer?.currentText = buffer.cleanText
     }
 
     /// Saves the editor buffer to disk and patches the index incrementally (no full
@@ -1018,6 +1059,11 @@ final class AppState: ObservableObject {
             baselineMTime: conflict.diskMTime
         )
         editorConflict = nil
+        // The source editor follows its text binding, but the visual editor renders from a
+        // one-shot web view load — force it to rebuild so it shows the adopted disk version,
+        // and let its first snapshot re-establish the clean reference.
+        awaitingVisualBaseline = true
+        visualReloadToken = UUID()
     }
 
     func dismissConflict() {

@@ -9,16 +9,38 @@ struct EditorBuffer: Equatable {
     /// The vault-relative id of the document being edited. Used to re-derive the file
     /// path at save time (never trust a captured absolute path that a move could stale).
     let documentId: String
-    /// The exact bytes loaded into the editor — the comparison point for "dirty" and for
-    /// conflict detection.
+    /// The exact on-disk bytes loaded into the editor — the splice target and the conflict
+    /// baseline (hashed below).
     let baselineText: String
     var currentText: String
+    /// The last-known-clean value of `currentText` — what "dirty" compares against. For the
+    /// source editor it equals `baselineText`. For the WYSIWYG editor it's the DOM's *initial*
+    /// re-serialized form, captured on load: WebKit re-serializes the body (normalized quoting,
+    /// whitespace) so it never matches the source bytes exactly, and comparing against that
+    /// initial form is what stops an untouched document from reading as edited.
+    var cleanText: String
     /// Index-style hash (`VaultIndexer.contentHash`) of `baselineText`, compared against
     /// the on-disk hash right before a write to detect an external change.
     let baselineHash: String
     let baselineMTime: Date
 
-    var isDirty: Bool { currentText != baselineText }
+    init(
+        documentId: String,
+        baselineText: String,
+        currentText: String,
+        baselineHash: String,
+        baselineMTime: Date,
+        cleanText: String? = nil
+    ) {
+        self.documentId = documentId
+        self.baselineText = baselineText
+        self.currentText = currentText
+        self.cleanText = cleanText ?? baselineText
+        self.baselineHash = baselineHash
+        self.baselineMTime = baselineMTime
+    }
+
+    var isDirty: Bool { currentText != cleanText }
 }
 
 /// Raised when the file changed on disk (its hash no longer matches the editor's
