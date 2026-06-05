@@ -49,6 +49,22 @@ struct ContentView: View {
                     }
                 }
 
+                // Reliable entry point for vault-root creation — the sidebar's empty-space
+                // context menu is not dependable on macOS, so these also live in the toolbar.
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button("New Document…") { SidebarActions.newDocument(inFolder: nil, appState: appState) }
+                        Button("New Folder…") { SidebarActions.newFolder(inParent: nil, appState: appState) }
+                        Divider()
+                        Button("Reveal Vault in Finder") {
+                            if let path = appState.vaultURL?.path { SidebarCommands.reveal(absolutePath: path) }
+                        }
+                    } label: {
+                        Label("New", systemImage: "plus")
+                    }
+                    .help("Create a new document or folder at the vault root.")
+                }
+
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         chooseVault()

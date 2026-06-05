@@ -25,8 +25,39 @@ struct DocumentTreeNode: Identifiable, Hashable {
 /// Builds a folder hierarchy from documents' relative paths. Folders are sorted
 /// before documents at each level; documents are sorted by title.
 enum DocumentTreeBuilder {
-    static func build(from documents: [DocumentNode]) -> [DocumentTreeNode] {
-        build(documents, depth: 0, folderPrefix: "")
+    static func build(from documents: [DocumentNode], extraFolders: [String] = []) -> [DocumentTreeNode] {
+        var nodes = build(documents, depth: 0, folderPrefix: "")
+        for folder in extraFolders.sorted() {
+            let components = folder.split(separator: "/").map(String.init)
+            nodes = inserting(folderComponents: components, into: nodes, prefix: "")
+        }
+        return nodes
+    }
+
+    /// Ensures the folder path described by `folderComponents` exists as folder nodes,
+    /// creating only the missing levels (idempotent for already-present folders) while
+    /// keeping each level's "folders first, sorted by name, then documents" order.
+    private static func inserting(folderComponents: [String], into nodes: [DocumentTreeNode], prefix: String) -> [DocumentTreeNode] {
+        guard let head = folderComponents.first else { return nodes }
+        let childPrefix = prefix.isEmpty ? head : "\(prefix)/\(head)"
+        let rest = Array(folderComponents.dropFirst())
+        var result = nodes
+
+        if let index = result.firstIndex(where: { $0.isFolder && $0.name == head }) {
+            var node = result[index]
+            node.children = inserting(folderComponents: rest, into: node.children, prefix: childPrefix)
+            result[index] = node
+        } else {
+            let children = inserting(folderComponents: rest, into: [], prefix: childPrefix)
+            let newNode = DocumentTreeNode(id: "folder:\(childPrefix)", name: head, document: nil, children: children)
+            let insertionIndex = result.firstIndex { existing in
+                existing.isFolder
+                    ? existing.name.localizedCaseInsensitiveCompare(head) == .orderedDescending
+                    : true // first document — folders sort ahead of documents
+            } ?? result.count
+            result.insert(newNode, at: insertionIndex)
+        }
+        return result
     }
 
     private static func build(_ documents: [DocumentNode], depth: Int, folderPrefix: String) -> [DocumentTreeNode] {
@@ -171,6 +202,11 @@ final class AppState: ObservableObject {
     @Published var isIndexing = false
     @Published var inboxItems: [InboxItem] = []
     @Published private(set) var recentVaults: [RecentVault] = []
+    /// Folders the user created in-session that don't yet contain a document. The
+    /// sidebar tree is derived from documents, so without this a freshly made empty
+    /// folder would be invisible — a right-click dead end. Cleared on vault switch and
+    /// pruned automatically once a real document lands inside.
+    @Published var pendingEmptyFolders: Set<String> = []
 
     private var indexingTask: Task<Void, Never>?
     private var inboxPollingTask: Task<Void, Never>?
@@ -313,9 +349,22 @@ final class AppState: ObservableObject {
         return Set(folders).subtracting([""]).sorted()
     }
 
-    /// Documents arranged as a folder hierarchy for the sidebar's tree view.
+    /// Folders the sidebar's "Move to" / "File Into" menus can target: every folder
+    /// that already holds a document, plus any in-session empty folders the user made.
+    var moveTargetFolders: [String] {
+        Set(vaultFolders).union(pendingEmptyFolders)
+            .filter { !isInboxRelativePath($0) }
+            .sorted()
+    }
+
+    /// Documents arranged as a folder hierarchy for the sidebar's tree view. Empty
+    /// folders the user just created are merged in until a document lands inside them.
     var documentTree: [DocumentTreeNode] {
-        DocumentTreeBuilder.build(from: index?.documents ?? [])
+        let documents = index?.documents ?? []
+        let extraFolders = pendingEmptyFolders.filter { folder in
+            !documents.contains { $0.path == folder || $0.path.hasPrefix(folder + "/") }
+        }
+        return DocumentTreeBuilder.build(from: documents, extraFolders: Array(extraFolders))
     }
 
     /// Opens a folder the user just picked via the panel. Claims security-scoped
@@ -403,6 +452,7 @@ final class AppState: ObservableObject {
         vaultURL = url
         if isDifferentVault {
             applyStoredSecuritySettings(for: url)
+            pendingEmptyFolders = []
         }
         index = nil
         sidebarSelection = nil
@@ -495,6 +545,16 @@ final class AppState: ObservableObject {
         case .success(let builtIndex):
             index = builtIndex
             if let vaultURL {
+                // Drop in-session empty folders that have since gained a document (now
+                // shown via the index) or vanished from disk (deleted out-of-band), so
+                // the overlay can't resurrect or ghost a folder.
+                pendingEmptyFolders = pendingEmptyFolders.filter { folder in
+                    let directory = vaultURL.appendingPathComponent(folder, isDirectory: true)
+                    var isDirectory: ObjCBool = false
+                    let exists = FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory) && isDirectory.boolValue
+                    let hasDocument = builtIndex.documents.contains { $0.path == folder || $0.path.hasPrefix(folder + "/") }
+                    return exists && !hasDocument
+                }
                 // Best-effort: emit the machine-readable graph sidecar for AI tools.
                 // A write failure must never break indexing and must not touch
                 // errorMessage (cleared on success below) — just log it so a missing
@@ -649,6 +709,258 @@ final class AppState: ObservableObject {
         </body>
         </html>
         """
+    }
+
+    // MARK: - Sidebar file operations
+
+    /// How many documents link to this one — surfaced before a rename/move/trash so the
+    /// user knows how many inbound links the operation will break (the graph is the whole
+    /// point of the app, so a silent break would be the worst outcome).
+    func backlinkCount(forDocument id: String) -> Int {
+        index?.backlinks[id]?.count ?? 0
+    }
+
+    /// Copies a document beside itself ("… copy"), then re-indexes and selects the copy.
+    func duplicateDocument(_ document: DocumentNode) {
+        guard let vaultURL else { return }
+        let folder = (document.path as NSString).deletingLastPathComponent
+        let filename = (document.path as NSString).lastPathComponent
+        let base = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        let copyName = ext.isEmpty ? "\(base) copy" : "\(base) copy.\(ext)"
+        let destination = uniqueRelativeDestination(folder: folder, filename: copyName, in: vaultURL)
+        let source = vaultURL.appendingPathComponent(document.path)
+        do {
+            try FileManager.default.copyItem(at: source, to: destination.url)
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+        pendingSelectionId = destination.relativePath
+        beginSession(at: vaultURL)
+    }
+
+    /// Moves a document into another vault folder (`nil` = root), resolving name
+    /// collisions, then re-indexes and selects it at its new path.
+    func moveDocument(_ document: DocumentNode, toFolder folder: String?) {
+        guard let vaultURL else { return }
+        let targetFolder = (folder ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let currentFolder = (document.path as NSString).deletingLastPathComponent
+        // Case-insensitive so a case-only "move" on a case-insensitive volume (APFS
+        // default) is treated as a no-op instead of colliding with the file itself.
+        guard targetFolder.localizedCaseInsensitiveCompare(currentFolder) != .orderedSame else { return }
+        guard !isInboxRelativePath(targetFolder) else {
+            errorMessage = "“\(InboxScanner.inboxDirectoryName)” is reserved for unfiled items."
+            return
+        }
+
+        let filename = (document.path as NSString).lastPathComponent
+        let destination = uniqueRelativeDestination(folder: targetFolder, filename: filename, in: vaultURL)
+        let source = vaultURL.appendingPathComponent(document.path)
+        do {
+            try FileManager.default.createDirectory(
+                at: destination.url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.moveItem(at: source, to: destination.url)
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+        removeEmptyFolderIfNeeded(currentFolder)
+        pendingSelectionId = destination.relativePath
+        beginSession(at: vaultURL)
+    }
+
+    /// Renames a document in place (folder unchanged). Forces an .html extension and
+    /// strips any path components from the typed name, then re-indexes and reselects.
+    func renameDocument(_ document: DocumentNode, to newName: String) {
+        guard let vaultURL else { return }
+        let folder = (document.path as NSString).deletingLastPathComponent
+        let originalExt = (document.path as NSString).pathExtension
+        var filename = (newName as NSString).lastPathComponent
+        let ext = (filename as NSString).pathExtension.lowercased()
+        if ext != "html" && ext != "htm" {
+            // Preserve the document's own extension (e.g. .htm) instead of forcing .html.
+            filename += originalExt.isEmpty ? ".html" : ".\(originalExt)"
+        }
+        guard !filename.hasPrefix(".") else {
+            errorMessage = "A document name can’t start with a dot."
+            return
+        }
+        guard filename != (document.path as NSString).lastPathComponent else { return }
+
+        let destination = uniqueRelativeDestination(folder: folder, filename: filename, in: vaultURL)
+        let source = vaultURL.appendingPathComponent(document.path)
+        do {
+            try FileManager.default.moveItem(at: source, to: destination.url)
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+        pendingSelectionId = destination.relativePath
+        beginSession(at: vaultURL)
+    }
+
+    /// Moves a document to the Trash (recoverable, unlike deletion), then re-indexes.
+    func trashDocument(_ document: DocumentNode) {
+        guard let vaultURL else { return }
+        let url = vaultURL.appendingPathComponent(document.path)
+        do {
+            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+        if sidebarSelection == .document(document.id) {
+            sidebarSelection = nil
+        }
+        beginSession(at: vaultURL)
+    }
+
+    /// Creates a new stub document in the given vault folder (`nil` = root), then
+    /// re-indexes and selects it. Reuses the same stub HTML as unresolved-link creation.
+    func createDocument(inFolder folder: String?, named name: String) {
+        guard let vaultURL else { return }
+        let targetFolder = (folder ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isInboxRelativePath(targetFolder) else {
+            errorMessage = "“\(InboxScanner.inboxDirectoryName)” is reserved for unfiled items."
+            return
+        }
+        var filename = (name as NSString).lastPathComponent
+        guard !filename.isEmpty else { return }
+        let ext = (filename as NSString).pathExtension.lowercased()
+        if ext != "html" && ext != "htm" {
+            filename += ".html"
+        }
+        // A dot-leading name becomes a hidden file the indexer skips, so the new
+        // document would silently never appear — reject it instead.
+        guard !filename.hasPrefix(".") else {
+            errorMessage = "A document name can’t start with a dot."
+            return
+        }
+        let destination = uniqueRelativeDestination(folder: targetFolder, filename: filename, in: vaultURL)
+        let title = (filename as NSString).deletingPathExtension
+        do {
+            try FileManager.default.createDirectory(
+                at: destination.url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Self.stubHTML(title: title).write(to: destination.url, atomically: true, encoding: .utf8)
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+        pendingSelectionId = destination.relativePath
+        beginSession(at: vaultURL)
+    }
+
+    /// Creates an empty folder under `parent` (`nil` = root). The tree is document-
+    /// derived, so the folder is tracked in `pendingEmptyFolders` to stay visible until
+    /// a document is added — no re-index needed since the document set didn't change.
+    func createFolder(named name: String, inParent parent: String?) {
+        guard let vaultURL else { return }
+        // Accept a typed nested path ("Reports/2024") rather than silently collapsing it
+        // to the last component; clean each segment and reject dot-leading ones.
+        let segments = name.split(separator: "/").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !segments.isEmpty else { return }
+        guard !segments.contains(where: { $0.hasPrefix(".") }) else {
+            errorMessage = "A folder name can’t start with a dot."
+            return
+        }
+        let trimmedParent = (parent ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let typed = segments.joined(separator: "/")
+        let base = trimmedParent.isEmpty ? typed : "\(trimmedParent)/\(typed)"
+        guard !isInboxRelativePath(base) else {
+            errorMessage = "“\(InboxScanner.inboxDirectoryName)” is reserved for unfiled items."
+            return
+        }
+        // Bump "name 2", "name 3", … on collision so "New Folder…" never silently merges
+        // into an existing folder (matching duplicate/move/rename/createDocument).
+        let relative = uniqueFolderRelativePath(base, in: vaultURL)
+        let url = vaultURL.appendingPathComponent(relative, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+        pendingEmptyFolders.insert(relative)
+    }
+
+    /// Moves an unfiled inbox item to the Trash and refreshes the inbox.
+    func trashInboxItem(_ item: InboxItem) {
+        let url = URL(fileURLWithPath: item.absolutePath)
+        do {
+            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+        if sidebarSelection == .inbox(item.id) {
+            sidebarSelection = nil
+        }
+        try? refreshInbox()
+    }
+
+    /// True for the vault's reserved Inbox dropbox (or anything inside it). The indexer
+    /// excludes these paths from the graph, so the sidebar must never offer them as a
+    /// create/move destination — a document landing there silently becomes "Unfiled".
+    private func isInboxRelativePath(_ relativePath: String) -> Bool {
+        // Case-insensitive: on a case-insensitive volume (APFS default) a folder typed as
+        // "inbox"/"INBOX" still resolves to the reserved Inbox dir, so it must be guarded
+        // too — otherwise a document placed there is silently excluded from the graph.
+        let inbox = InboxScanner.inboxDirectoryName.lowercased()
+        let path = relativePath.lowercased()
+        return path == inbox || path.hasPrefix(inbox + "/")
+    }
+
+    /// Returns `base` (vault-relative) bumped to "base 2", "base 3", … until it names a
+    /// path that doesn't yet exist on disk, so folder creation never merges into an
+    /// existing directory.
+    private func uniqueFolderRelativePath(_ base: String, in vaultURL: URL) -> String {
+        var candidate = base
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: vaultURL.appendingPathComponent(candidate).standardizedFileURL.path) {
+            candidate = "\(base) \(suffix)"
+            suffix += 1
+        }
+        return candidate
+    }
+
+    /// Removes a now-empty source folder after a move so the sidebar (which is derived
+    /// from documents) and Finder don't drift apart. Conservative: never touches the
+    /// vault root, the Inbox, or a folder that still holds anything (incl. hidden files).
+    private func removeEmptyFolderIfNeeded(_ relativeFolder: String) {
+        guard let vaultURL, !relativeFolder.isEmpty, !isInboxRelativePath(relativeFolder) else { return }
+        let url = vaultURL.appendingPathComponent(relativeFolder, isDirectory: true)
+        guard let contents = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil),
+              contents.isEmpty else { return }
+        try? FileManager.default.removeItem(at: url)
+        pendingEmptyFolders.remove(relativeFolder)
+    }
+
+    /// Builds a non-colliding destination for a file going into `folder` (vault-relative,
+    /// "" = root), returning both the absolute URL and the matching relative path (which
+    /// is also the document's index id). Bumps "name 2", "name 3", … on collision.
+    private func uniqueRelativeDestination(folder: String, filename: String, in vaultURL: URL) -> (url: URL, relativePath: String) {
+        let base = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+
+        func relativePath(_ name: String) -> String {
+            folder.isEmpty ? name : "\(folder)/\(name)"
+        }
+
+        var name = filename
+        var suffix = 2
+        var url = vaultURL.appendingPathComponent(relativePath(name))
+        while FileManager.default.fileExists(atPath: url.standardizedFileURL.path) {
+            name = ext.isEmpty ? "\(base) \(suffix)" : "\(base) \(suffix).\(ext)"
+            url = vaultURL.appendingPathComponent(relativePath(name))
+            suffix += 1
+        }
+        return (url, relativePath(name))
     }
 
     private func startInboxPolling() {
