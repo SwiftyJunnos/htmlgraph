@@ -908,8 +908,12 @@ final class AppState: ObservableObject {
     /// excludes these paths from the graph, so the sidebar must never offer them as a
     /// create/move destination — a document landing there silently becomes "Unfiled".
     private func isInboxRelativePath(_ relativePath: String) -> Bool {
-        let inbox = InboxScanner.inboxDirectoryName
-        return relativePath == inbox || relativePath.hasPrefix(inbox + "/")
+        // Case-insensitive: on a case-insensitive volume (APFS default) a folder typed as
+        // "inbox"/"INBOX" still resolves to the reserved Inbox dir, so it must be guarded
+        // too — otherwise a document placed there is silently excluded from the graph.
+        let inbox = InboxScanner.inboxDirectoryName.lowercased()
+        let path = relativePath.lowercased()
+        return path == inbox || path.hasPrefix(inbox + "/")
     }
 
     /// Returns `base` (vault-relative) bumped to "base 2", "base 3", … until it names a
