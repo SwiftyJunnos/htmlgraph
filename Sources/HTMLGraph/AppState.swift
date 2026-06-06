@@ -675,16 +675,24 @@ final class AppState: ObservableObject {
         return SemanticIndexer(provider: embeddingProvider, store: embeddingStore)
     }
 
+    /// Shortest query that runs a semantic pass. Embedding a 1-character query is mostly
+    /// noise for the cost, and the instant lexical title section already covers that intent
+    /// — so the Meaning section stays quiet until there's at least this much signal. Counted
+    /// in grapheme clusters, so one Hangul syllable counts as one (a 2-syllable Korean query
+    /// or a 2-letter Latin query both qualify).
+    private static let minimumSemanticQueryLength = 2
+
     /// Debounced semantic query: embeds the query off-main, cosine+centrality ranks it
-    /// against the current embedding index, and publishes the matching documents. Runs on
-    /// every query alongside the lexical title search (the sidebar shows both as separate
-    /// sections). Generation-guarded so a stale keystroke's results are dropped. A no-op
-    /// (clears results) with an empty query or without a ready index.
+    /// against the current embedding index, and publishes the matching documents. Runs
+    /// alongside the lexical title search (the sidebar shows both as separate sections) for
+    /// queries of at least `minimumSemanticQueryLength`. Generation-guarded so a stale
+    /// keystroke's results are dropped. A no-op (clears results) for shorter queries or
+    /// without a ready index.
     func runSemanticSearch() {
         searchTask?.cancel()
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard !query.isEmpty,
+        guard query.count >= Self.minimumSemanticQueryLength,
               let embeddingIndex, let graph = index, let indexer = makeSemanticIndexer() else {
             withoutSearchAnimation {
                 semanticResults = []
