@@ -218,7 +218,27 @@ Asset/availability handling: first time semantic search is needed, if
 If assets can't be obtained (or the model is unavailable for the content), set
 `.unavailable` → the UI silently keeps lexical mode (see 0.3).
 
-### Phase 0.3 — Search-mode toggle + semantic results in the sidebar (the user-visible ship)
+### Phase 0.3 — Search-mode toggle + semantic results in the sidebar (the user-visible ship) ✅ DONE (2026-06-06)
+
+**Status:** Implemented on `feat/semantic-search`. AppState: `SearchMode` enum
+(`.title`/`.meaning`), `@Published searchMode`, `@Published private(set) semanticResults`,
+`isSearchingSemantically`, `searchGeneration`/`searchTask`, and `runSemanticSearch()`
+(250 ms debounce, gen-guarded, embeds off-main via the actor, cosine+centrality ranks
+topK=50, maps ids→DocumentNode; no-op outside `.meaning`/empty query/no ready index);
+`beginSession` clears search state. UI: native `.searchScopes` ("Title" | "Meaning")
+bar under the existing `.searchable` field in `ContentView` + `.onChange(searchText/
+searchMode)` triggers; `VaultSidebar.documentsSection` branches to `semanticResultsSection`
+in Meaning mode — quiet `Text` rows for Searching…/No matches/Preparing…, transparent
+lexical fallback + one-line note when `semanticIndexState == .unavailable` (no colored
+pills/spinners — "no AI slop"). **185 tests pass, xcodebuild BUILD SUCCEEDED.** Used the
+native scope bar instead of a custom Picker (more idiomatic, zero chrome). Manual QA over
+`Fixtures/sample-vault` remains for the user (open vault → Meaning → query).
+
+**✅ Phase 0 COMPLETE** — on-device semantic search ships end-to-end (substrate →
+real provider + lifecycle → UI), zero egress / zero new write paths / zero new
+entitlement, fully reversible (delete `.htmlgraph/embeddings.json`). Branch
+`feat/semantic-search` ready for review/merge; this unblocks Phase 1 (read-only MCP
+server with a `semantic_search` tool over this index).
 
 **Goal:** the feature becomes usable, in the **minimal/native** style the project
 demands (the in-app-editor memo: *no AI slop* — no colored pills, no status bars;

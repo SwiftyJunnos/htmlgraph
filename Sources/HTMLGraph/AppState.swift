@@ -163,6 +163,14 @@ struct VaultSecurityStore {
     }
 }
 
+/// Which kind of sidebar search the query field performs.
+enum SearchMode: Hashable {
+    /// Lexical substring match on title/path (instant, always available).
+    case title
+    /// On-device semantic (meaning) search over the embedding index.
+    case meaning
+}
+
 /// Lifecycle of the on-device semantic index for the current vault.
 enum SemanticIndexState: Equatable {
     /// No vault open / nothing built yet.
@@ -279,6 +287,18 @@ final class AppState: ObservableObject {
     /// Guards background re-embed results so a superseded vault-open or edit can't
     /// publish a stale index (mirrors `indexingGeneration` for the lexical index).
     private var embeddingGeneration = UUID()
+
+    /// Sidebar search mode. Lexical (`.title`) is the instant default; `.meaning`
+    /// runs the on-device semantic search.
+    @Published var searchMode: SearchMode = .title
+    /// Ranked semantic hits for the current query, mapped back to documents.
+    @Published private(set) var semanticResults: [DocumentNode] = []
+    /// True while a semantic query is being embedded/ranked (drives the quiet
+    /// "Searching…" row).
+    @Published private(set) var isSearchingSemantically = false
+    /// Drops the results of a superseded keystroke so a stale query can't publish.
+    private var searchGeneration = UUID()
+    private var searchTask: Task<Void, Never>?
 
     init(
         recentsStore: RecentVaultsStore = RecentVaultsStore(),
@@ -514,6 +534,9 @@ final class AppState: ObservableObject {
         embeddingIndex = nil
         semanticIndexState = .idle
         embeddingGeneration = UUID()
+        searchTask?.cancel()
+        semanticResults = []
+        isSearchingSemantically = false
         // Any in-app edit belongs to the index we're about to discard. Callers that can
         // reach here with a dirty buffer are gated by `EditorGuard` first (save/discard),
         // so clearing it here only drops an already-clean or intentionally-abandoned buffer.
@@ -663,6 +686,38 @@ final class AppState: ObservableObject {
         return SemanticIndexer(provider: embeddingProvider, store: embeddingStore)
     }
 
+    /// Debounced semantic query: embeds the query off-main, cosine+centrality ranks it
+    /// against the current embedding index, and publishes the matching documents.
+    /// Generation-guarded so a stale keystroke's results are dropped. A no-op (clears
+    /// results) outside `.meaning` mode, with an empty query, or without a ready index.
+    func runSemanticSearch() {
+        searchTask?.cancel()
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard searchMode == .meaning, !query.isEmpty,
+              let embeddingIndex, let graph = index, let indexer = makeSemanticIndexer() else {
+            semanticResults = []
+            isSearchingSemantically = false
+            return
+        }
+
+        let generation = UUID()
+        searchGeneration = generation
+        isSearchingSemantically = true
+
+        searchTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000) // debounce keystrokes
+            if Task.isCancelled { return }
+            let hits = (try? await indexer.search(query: query, in: embeddingIndex, graph: graph, topK: 50)) ?? []
+            await MainActor.run {
+                guard let self, self.searchGeneration == generation else { return }
+                let byId = Dictionary(self.index?.documents.map { ($0.id, $0) } ?? [], uniquingKeysWith: { first, _ in first })
+                self.semanticResults = hits.compactMap { byId[$0.documentId] }
+                self.isSearchingSemantically = false
+            }
+        }
+    }
+
     /// Rebuilds the whole semantic index off-main after a full reindex. Re-embeds only
     /// documents whose content changed (cache hit otherwise) and prunes ghosts.
     /// Generation-guarded so a superseded vault-open drops its result.
@@ -738,6 +793,7 @@ final class AppState: ObservableObject {
     deinit {
         indexingTask?.cancel()
         inboxPollingTask?.cancel()
+        searchTask?.cancel()
         httpServer.stop()
         accessedVaultURL?.stopAccessingSecurityScopedResource()
     }
