@@ -67,8 +67,10 @@ struct VaultSidebar: View {
 
     @ViewBuilder
     private var lexicalResultsSection: some View {
-        if !appState.filteredDocuments.isEmpty {
-            Section("Documents") {
+        Section("Documents") {
+            if appState.filteredDocuments.isEmpty {
+                Text("No matches").foregroundStyle(.secondary)
+            } else {
                 ForEach(appState.filteredDocuments) { document in
                     documentRow(document)
                 }

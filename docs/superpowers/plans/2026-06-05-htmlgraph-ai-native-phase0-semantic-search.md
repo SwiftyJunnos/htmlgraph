@@ -114,7 +114,8 @@ comfortable usable gap. No escalation to Core ML MiniLM needed; proceed on the
 `VaultEmbeddingStore`, `SemanticIndexer`) plus `HTMLMetadataExtractor.bodyText`. Test
 suites added under `Tests/HTMLGraphCoreTests/Embedding/` (math, store round-trip/mismatch,
 input chunking, indexer skip/recompute/ghost-prune/full≡incremental, ranking fusion) —
-**183 tests pass** (`swift test`) and **`xcodebuild` BUILD SUCCEEDED** (pbxproj registered:
+**183 tests pass** (`swift test`; Phase 0.2 later adds 2 real-provider tests → 185) and
+**`xcodebuild` BUILD SUCCEEDED** (pbxproj registered:
 new `Embedding` group + 5 file/build refs). Notes on what firmed up during impl: types are
 `Sendable` for the 0.2 detached-Task hooks (`VaultEmbeddingStore` dropped its stored
 `FileManager`); `SemanticIndexer` takes an injectable `bodyTextLoader` (default reads
@@ -147,7 +148,7 @@ Extend existing (additive, schema-safe):
 `VaultIndex.edges` (resolved edges only — both out-degree from `sourceId` and
 in-degree from `targetId`); semantics dominate and centrality only breaks near-ties:
 
-```
+```text
 finalScore = cosine + β · ( log(1 + degree) / log(1 + maxDegree) )   // β ≈ 0.08, tunable
 ```
 
