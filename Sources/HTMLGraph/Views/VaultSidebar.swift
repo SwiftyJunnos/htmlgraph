@@ -53,20 +53,64 @@ struct VaultSidebar: View {
     private var documentsSection: some View {
         if isSearching {
             // Flat results while searching, so a match can't hide inside a collapsed folder.
-            if !appState.filteredDocuments.isEmpty {
-                Section("Documents") {
-                    ForEach(appState.filteredDocuments) { document in
-                        SidebarRowLabel(title: document.title, subtitle: document.path)
-                            .tag(SidebarSelection.document(document.id))
-                            .contextMenu { documentContextMenu(document, appState: appState) }
-                    }
-                }
+            if appState.searchMode == .meaning {
+                semanticResultsSection
+            } else {
+                lexicalResultsSection
             }
         } else if !appState.documentTree.isEmpty {
             Section("Documents") {
                 DocumentTreeRows(nodes: appState.documentTree, collapsedFolders: $collapsedFolders)
             }
         }
+    }
+
+    @ViewBuilder
+    private var lexicalResultsSection: some View {
+        Section("Documents") {
+            if appState.filteredDocuments.isEmpty {
+                Text("No matches").foregroundStyle(.secondary)
+            } else {
+                ForEach(appState.filteredDocuments) { document in
+                    documentRow(document)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var semanticResultsSection: some View {
+        Section("Documents") {
+            switch appState.semanticIndexState {
+            case .unavailable:
+                // No on-device model/assets — fall back to lexical, transparently.
+                ForEach(appState.filteredDocuments) { document in
+                    documentRow(document)
+                }
+                Text("Meaning search unavailable — showing title matches.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .ready:
+                if appState.isSearchingSemantically {
+                    Text("Searching…").foregroundStyle(.secondary)
+                } else if appState.semanticResults.isEmpty {
+                    Text("No matches").foregroundStyle(.secondary)
+                } else {
+                    ForEach(appState.semanticResults) { document in
+                        documentRow(document)
+                    }
+                }
+            case .idle, .preparingAssets, .building:
+                Text("Preparing meaning search…").foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func documentRow(_ document: DocumentNode) -> some View {
+        SidebarRowLabel(title: document.title, subtitle: document.path)
+            .tag(SidebarSelection.document(document.id))
+            .contextMenu { documentContextMenu(document, appState: appState) }
     }
 }
 

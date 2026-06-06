@@ -31,4 +31,43 @@ final class HTMLMetadataExtractorTests: XCTestCase {
         XCTAssertEqual(links.map(\.href), ["./notes/graph.html", "https://example.com"])
         XCTAssertEqual(links.map(\.text), ["Graph note", "External"])
     }
+
+    // MARK: - bodyText
+
+    func testBodyTextStripsTagsAndCollapsesWhitespace() throws {
+        let extractor = HTMLMetadataExtractor()
+        let text = try extractor.bodyText(from: """
+        <html><body>
+          <h1>제목</h1>
+          <p>첫째   문단.</p>
+          <p>둘째 문단.</p>
+        </body></html>
+        """)
+        XCTAssertEqual(text, "제목 첫째 문단. 둘째 문단.")
+    }
+
+    func testBodyTextRemovesScriptAndStyleContents() throws {
+        let extractor = HTMLMetadataExtractor()
+        let text = try extractor.bodyText(from: """
+        <html><body>
+          <style>.x { color: red; }</style>
+          <p>보이는 텍스트</p>
+          <script>console.log("hidden");</script>
+        </body></html>
+        """)
+        XCTAssertEqual(text, "보이는 텍스트")
+    }
+
+    func testBodyTextMissingBodyIsEmpty() throws {
+        let extractor = HTMLMetadataExtractor()
+        // No body element at all.
+        XCTAssertEqual(try extractor.bodyText(from: "<html><head><title>T</title></head></html>"), "")
+    }
+
+    func testBodyTextRespectsMaxChars() throws {
+        let extractor = HTMLMetadataExtractor()
+        let body = String(repeating: "가", count: 5000)
+        let text = try extractor.bodyText(from: "<html><body>\(body)</body></html>", maxChars: 100)
+        XCTAssertEqual(text.count, 100)
+    }
 }
