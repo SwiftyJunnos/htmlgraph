@@ -696,26 +696,47 @@ final class AppState: ObservableObject {
 
         guard searchMode == .meaning, !query.isEmpty,
               let embeddingIndex, let graph = index, let indexer = makeSemanticIndexer() else {
-            semanticResults = []
-            isSearchingSemantically = false
+            withoutSearchAnimation {
+                semanticResults = []
+                isSearchingSemantically = false
+            }
             return
         }
 
         let generation = UUID()
         searchGeneration = generation
-        isSearchingSemantically = true
 
         searchTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 250_000_000) // debounce keystrokes
             if Task.isCancelled { return }
+            // Flip the "searching" flag only after the debounce survives, so keystrokes that
+            // are superseded mid-burst never cause a list relayout. Fewer relayouts while
+            // typing means fewer chances for the row animation to strand an overlapping row.
+            await MainActor.run {
+                guard let self, self.searchGeneration == generation else { return }
+                self.withoutSearchAnimation { self.isSearchingSemantically = true }
+            }
             let hits = (try? await indexer.search(query: query, in: embeddingIndex, graph: graph, topK: 50)) ?? []
             await MainActor.run {
                 guard let self, self.searchGeneration == generation else { return }
                 let byId = Dictionary(self.index?.documents.map { ($0.id, $0) } ?? [], uniquingKeysWith: { first, _ in first })
-                self.semanticResults = hits.compactMap { byId[$0.documentId] }
-                self.isSearchingSemantically = false
+                self.withoutSearchAnimation {
+                    self.semanticResults = hits.compactMap { byId[$0.documentId] }
+                    self.isSearchingSemantically = false
+                }
             }
         }
+    }
+
+    /// Publishes search-state mutations without SwiftUI's implicit list animation. The
+    /// sidebar's `List(.sidebar)` is backed by an AppKit outline view that animates row
+    /// insert/remove; when the result set churns faster than the animation settles, an
+    /// outgoing and an incoming row briefly share one row frame and render overlapping.
+    /// Disabling the animation at the mutation source makes the re-diff snap instead.
+    private func withoutSearchAnimation(_ body: () -> Void) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction, body)
     }
 
     /// Rebuilds the whole semantic index off-main after a full reindex. Re-embeds only

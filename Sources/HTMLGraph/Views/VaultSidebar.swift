@@ -35,6 +35,14 @@ struct VaultSidebar: View {
             documentsSection
         }
         .listStyle(.sidebar)
+        // Suppress the implicit row insert/remove animation while a query churns the result
+        // set. The sidebar's NSOutlineView-backed List otherwise animates an outgoing and an
+        // incoming row through the same frame, so two rows momentarily render overlapping —
+        // search results don't need to animate into place. (Reinforced at the mutation source
+        // in AppState.withoutSearchAnimation for the async Meaning-mode publishes.)
+        .animation(nil, value: appState.searchText)
+        .animation(nil, value: appState.semanticResults)
+        .animation(nil, value: appState.isSearchingSemantically)
         // Vault-wide actions for right-clicking empty sidebar space. Row context menus
         // take precedence over this for their own rows.
         .contextMenu {
@@ -51,58 +59,77 @@ struct VaultSidebar: View {
 
     @ViewBuilder
     private var documentsSection: some View {
+        // One stable `Section("Documents")` whose ROWS switch between the folder tree and the
+        // flat search results. Keeping the Section container fixed (instead of swapping a
+        // separately-declared Section per branch) means the sidebar's AppKit-backed List only
+        // has to diff the rows inside it as the query changes — a lighter update that, with the
+        // animation suppression on the List, stops two rows being animated through one frame.
+        if isSearching || !appState.documentTree.isEmpty {
+            Section {
+                documentsSectionRows
+            } header: {
+                HStack(spacing: 6) {
+                    Text("Documents")
+                    // A quiet inline spinner replaces the old "Searching…" placeholder row, so
+                    // a refining query no longer collapses the result rows to one and back.
+                    if appState.isSearchingSemantically {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var documentsSectionRows: some View {
         if isSearching {
             // Flat results while searching, so a match can't hide inside a collapsed folder.
             if appState.searchMode == .meaning {
-                semanticResultsSection
+                semanticResultRows
             } else {
-                lexicalResultsSection
+                lexicalResultRows
             }
-        } else if !appState.documentTree.isEmpty {
-            Section("Documents") {
-                DocumentTreeRows(nodes: appState.documentTree, collapsedFolders: $collapsedFolders)
+        } else {
+            DocumentTreeRows(nodes: appState.documentTree, collapsedFolders: $collapsedFolders)
+        }
+    }
+
+    @ViewBuilder
+    private var lexicalResultRows: some View {
+        if appState.filteredDocuments.isEmpty {
+            Text("No matches").foregroundStyle(.secondary)
+        } else {
+            ForEach(appState.filteredDocuments) { document in
+                documentRow(document)
             }
         }
     }
 
     @ViewBuilder
-    private var lexicalResultsSection: some View {
-        Section("Documents") {
-            if appState.filteredDocuments.isEmpty {
-                Text("No matches").foregroundStyle(.secondary)
-            } else {
-                ForEach(appState.filteredDocuments) { document in
-                    documentRow(document)
-                }
+    private var semanticResultRows: some View {
+        switch appState.semanticIndexState {
+        case .unavailable:
+            // No on-device model/assets — fall back to lexical, transparently.
+            ForEach(appState.filteredDocuments) { document in
+                documentRow(document)
             }
-        }
-    }
-
-    @ViewBuilder
-    private var semanticResultsSection: some View {
-        Section("Documents") {
-            switch appState.semanticIndexState {
-            case .unavailable:
-                // No on-device model/assets — fall back to lexical, transparently.
-                ForEach(appState.filteredDocuments) { document in
-                    documentRow(document)
-                }
-                Text("Meaning search unavailable — showing title matches.")
-                    .font(.caption)
+            Text("Meaning search unavailable — showing title matches.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .ready:
+            if appState.semanticResults.isEmpty {
+                // Only show the bare placeholder when nothing else is on screen. Once results
+                // exist they stay visible while a refined query computes (the header spinner
+                // signals progress), avoiding the N→1→N row churn that strands an overlap.
+                Text(appState.isSearchingSemantically ? "Searching…" : "No matches")
                     .foregroundStyle(.secondary)
-            case .ready:
-                if appState.isSearchingSemantically {
-                    Text("Searching…").foregroundStyle(.secondary)
-                } else if appState.semanticResults.isEmpty {
-                    Text("No matches").foregroundStyle(.secondary)
-                } else {
-                    ForEach(appState.semanticResults) { document in
-                        documentRow(document)
-                    }
+            } else {
+                ForEach(appState.semanticResults) { document in
+                    documentRow(document)
                 }
-            case .idle, .preparingAssets, .building:
-                Text("Preparing meaning search…").foregroundStyle(.secondary)
             }
+        case .idle, .preparingAssets, .building:
+            Text("Preparing meaning search…").foregroundStyle(.secondary)
         }
     }
 
