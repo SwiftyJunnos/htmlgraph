@@ -163,7 +163,23 @@ Tests (`Tests/HTMLGraphCoreTests/Embedding/`), all with the deterministic provid
   `maxChars` cap, implicit/empty body ⇒ `""`, script/style stripped.
 - `SemanticRankingTests` — cosine + centrality fusion produces the expected order on a fixture graph.
 
-### Phase 0.2 — Real provider + index lifecycle wiring (background, gen-guarded; still no visible UI)
+### Phase 0.2 — Real provider + index lifecycle wiring (background, gen-guarded; still no visible UI) ✅ DONE (2026-06-06)
+
+**Status:** Implemented on `feat/semantic-search`. `NLContextualEmbeddingProvider`
+(actor, CJK `.korean` model, lazy `hasAvailableAssets`→`requestAssets`→`load`, per-token
+mean-pool, `identifier = "nl-contextual.cjk.v1"`) + `EmbeddingProviderError.assetsUnavailable`.
+AppState: `embeddingProvider`/`embeddingStore`/`@Published embeddingIndex`/
+`@Published semanticIndexState`/`embeddingGeneration` state; `SemanticIndexState` enum;
+full re-embed hook in `finishIndexing` (after the graph.json export) and incremental
+re-embed in `writeEditorText` (after the sync `reindexDocument`+export — reindex stays
+synchronous per issue #6); `beginSession` resets embedding state + bumps generation on
+vault switch; all background work is `Task.detached(.utility)` with a MainActor publish
+and generation guard. Korean correctness integration test added (guardrail #7, skips when
+assets absent) — **185 tests pass**, **xcodebuild BUILD SUCCEEDED**. Deviations from plan:
+the provider exposes `assetsAreAvailable`/`prepare()` (concrete-type extras, not on the
+protocol) for a future `.preparingAssets` surface; 0.2 currently goes `building → ready/
+unavailable` (no `.preparingAssets` transition yet — assets were already present, so wiring
+it is deferred to 0.3 where the state is actually shown).
 
 **Goal:** the live embedding index stays current as the vault is indexed and edited,
 using the **real** `NLContextualEmbedding` provider — but with no user-facing search

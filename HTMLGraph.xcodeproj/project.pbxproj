@@ -44,6 +44,7 @@
 		010000000000000000000153 /* EmbeddingInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000053 /* EmbeddingInput.swift */; };
 		010000000000000000000154 /* VaultEmbeddingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000054 /* VaultEmbeddingStore.swift */; };
 		010000000000000000000155 /* SemanticIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000055 /* SemanticIndexer.swift */; };
+		010000000000000000000156 /* NLContextualEmbeddingProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000056 /* NLContextualEmbeddingProvider.swift */; };
 		010000000000000000000301 /* HTMLGraphCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 010000000000000000000502 /* HTMLGraphCore.framework */; };
 		010000000000000000000302 /* HTMLGraphCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 010000000000000000000502 /* HTMLGraphCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		01000000000000000000030A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000032 /* Assets.xcassets */; };
@@ -110,6 +111,7 @@
 		010000000000000000000053 /* EmbeddingInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingInput.swift; sourceTree = "<group>"; };
 		010000000000000000000054 /* VaultEmbeddingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultEmbeddingStore.swift; sourceTree = "<group>"; };
 		010000000000000000000055 /* SemanticIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticIndexer.swift; sourceTree = "<group>"; };
+		010000000000000000000056 /* NLContextualEmbeddingProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NLContextualEmbeddingProvider.swift; sourceTree = "<group>"; };
 		010000000000000000000031 /* HTMLGraph.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HTMLGraph.entitlements; sourceTree = "<group>"; };
 		010000000000000000000032 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		010000000000000000000033 /* AppIcon.svg */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = AppIcon.svg; sourceTree = "<group>"; };
@@ -190,6 +192,7 @@
 				010000000000000000000053 /* EmbeddingInput.swift */,
 				010000000000000000000054 /* VaultEmbeddingStore.swift */,
 				010000000000000000000055 /* SemanticIndexer.swift */,
+				010000000000000000000056 /* NLContextualEmbeddingProvider.swift */,
 			);
 			path = Embedding;
 			sourceTree = "<group>";
@@ -402,6 +405,7 @@
 				010000000000000000000153 /* EmbeddingInput.swift in Sources */,
 				010000000000000000000154 /* VaultEmbeddingStore.swift in Sources */,
 				010000000000000000000155 /* SemanticIndexer.swift in Sources */,
+				010000000000000000000156 /* NLContextualEmbeddingProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

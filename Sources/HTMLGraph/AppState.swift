@@ -163,9 +163,24 @@ struct VaultSecurityStore {
     }
 }
 
+/// Lifecycle of the on-device semantic index for the current vault.
+enum SemanticIndexState: Equatable {
+    /// No vault open / nothing built yet.
+    case idle
+    /// Downloading the embedding model's assets (one-time, first use).
+    case preparingAssets
+    /// Building the index. `progress` is in `0...1` (0 when indeterminate).
+    case building(progress: Double)
+    /// Index is ready to answer semantic queries.
+    case ready
+    /// No on-device model, or assets couldn't be obtained — UI keeps lexical search.
+    case unavailable
+}
+
 @MainActor
 final class AppState: ObservableObject {
     private static let exportLogger = Logger(subsystem: "com.junnos.htmlgraph", category: "VaultIndexExport")
+    private nonisolated static let embeddingLogger = Logger(subsystem: "com.junnos.htmlgraph", category: "SemanticIndex")
 
     @Published var vaultURL: URL?
     /// Loopback origin (`http://127.0.0.1:<port>/<token>/`) the current vault is served
@@ -249,6 +264,21 @@ final class AppState: ObservableObject {
 
     /// A document id to select once the next index finishes (e.g. a just-created doc).
     private var pendingSelectionId: String?
+
+    // MARK: - Semantic search (Phase 0.2)
+
+    /// On-device embedding provider, or nil if the OS has no model for the content —
+    /// then semantic search stays `.unavailable` and the UI keeps lexical search.
+    private let embeddingProvider: EmbeddingProvider? = NLContextualEmbeddingProvider()
+    private let embeddingStore = VaultEmbeddingStore()
+    /// In-memory embedding index for the current vault, kept current by the re-embed
+    /// hooks below. Read by the (Phase 0.3) semantic search.
+    @Published private(set) var embeddingIndex: EmbeddingIndex?
+    /// Lifecycle state for semantic search; drives the Phase 0.3 UI fallback.
+    @Published private(set) var semanticIndexState: SemanticIndexState = .idle
+    /// Guards background re-embed results so a superseded vault-open or edit can't
+    /// publish a stale index (mirrors `indexingGeneration` for the lexical index).
+    private var embeddingGeneration = UUID()
 
     init(
         recentsStore: RecentVaultsStore = RecentVaultsStore(),
@@ -479,6 +509,11 @@ final class AppState: ObservableObject {
         }
         index = nil
         sidebarSelection = nil
+        // Drop the previous vault's semantic index and invalidate any in-flight
+        // re-embed so its result can't land in this session.
+        embeddingIndex = nil
+        semanticIndexState = .idle
+        embeddingGeneration = UUID()
         // Any in-app edit belongs to the index we're about to discard. Callers that can
         // reach here with a dirty buffer are gated by `EditorGuard` first (save/discard),
         // so clearing it here only drops an already-clean or intentionally-abandoned buffer.
@@ -592,6 +627,9 @@ final class AppState: ObservableObject {
                 } catch {
                     Self.exportLogger.error("graph.json export failed: \(error.localizedDescription, privacy: .public)")
                 }
+                // Best-effort, off-main: refresh the on-device semantic index. Never
+                // blocks indexing (exactly like the graph.json export above).
+                rebuildEmbeddingIndex(for: builtIndex, vaultURL: vaultURL)
             }
             if let pendingSelectionId, builtIndex.document(id: pendingSelectionId) != nil {
                 sidebarSelection = .document(pendingSelectionId)
@@ -616,6 +654,85 @@ final class AppState: ObservableObject {
         isIndexing = false
         indexingTask = nil
         pendingSelectionId = nil
+    }
+
+    // MARK: - Semantic index lifecycle (Phase 0.2)
+
+    private func makeSemanticIndexer() -> SemanticIndexer? {
+        guard let embeddingProvider else { return nil }
+        return SemanticIndexer(provider: embeddingProvider, store: embeddingStore)
+    }
+
+    /// Rebuilds the whole semantic index off-main after a full reindex. Re-embeds only
+    /// documents whose content changed (cache hit otherwise) and prunes ghosts.
+    /// Generation-guarded so a superseded vault-open drops its result.
+    private func rebuildEmbeddingIndex(for index: VaultIndex, vaultURL: URL) {
+        guard let indexer = makeSemanticIndexer() else {
+            semanticIndexState = .unavailable
+            return
+        }
+        let generation = UUID()
+        embeddingGeneration = generation
+        semanticIndexState = .building(progress: 0)
+
+        Task.detached(priority: .utility) { [weak self] in
+            do {
+                let result = try await indexer.refresh(index: index, vaultURL: vaultURL)
+                await MainActor.run {
+                    guard let self, self.embeddingGeneration == generation else { return }
+                    self.embeddingIndex = result
+                    self.semanticIndexState = .ready
+                }
+            } catch {
+                await MainActor.run {
+                    guard let self, self.embeddingGeneration == generation else { return }
+                    self.embeddingIndex = nil
+                    self.semanticIndexState = .unavailable
+                    Self.embeddingLogger.error("embedding refresh failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        }
+    }
+
+    /// Re-embeds exactly one document after an in-app save, off-main, and patches the
+    /// in-memory index + sidecar. Bumps the generation so any in-flight full rebuild is
+    /// invalidated (the just-saved vector must win). No-op until a full index exists.
+    private func refreshEmbedding(forDocumentId documentId: String, in index: VaultIndex, vaultURL: URL) {
+        guard let indexer = makeSemanticIndexer(),
+              embeddingIndex != nil,
+              let document = index.document(id: documentId) else { return }
+        let generation = UUID()
+        embeddingGeneration = generation
+
+        Task.detached(priority: .utility) { [weak self] in
+            do {
+                let record = try await indexer.embedRecord(for: document)
+                await MainActor.run {
+                    guard let self, self.embeddingGeneration == generation,
+                          var current = self.embeddingIndex else { return }
+                    current.entries[documentId] = record
+                    self.embeddingIndex = current
+                    self.persistEmbeddingIndex(to: vaultURL)
+                }
+            } catch {
+                await MainActor.run {
+                    Self.embeddingLogger.error("incremental embedding failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        }
+    }
+
+    /// Persists the current in-memory embedding index to its sidecar, off-main.
+    private func persistEmbeddingIndex(to vaultURL: URL) {
+        guard let snapshot = embeddingIndex else { return }
+        let store = embeddingStore
+        Task.detached(priority: .utility) {
+            do {
+                try store.save(snapshot.entries, providerId: snapshot.providerId, dimension: snapshot.dimension, vaultURL: vaultURL)
+            } catch {
+                Self.embeddingLogger.error("embedding persist failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     deinit {
@@ -1109,6 +1226,10 @@ final class AppState: ObservableObject {
                 } catch {
                     Self.exportLogger.error("graph.json export failed: \(error.localizedDescription, privacy: .public)")
                 }
+                // Re-embed just this document, off-main, AFTER the synchronous reindex
+                // returned. Never gates save success (issue #6: the reindex itself stays
+                // synchronous; only the embedding is async and strictly downstream).
+                refreshEmbedding(forDocumentId: documentId, in: patched, vaultURL: vaultURL)
             } catch {
                 // The write already succeeded, so no data is lost; only the in-memory
                 // graph is briefly stale until the next full reindex reconciles it.
