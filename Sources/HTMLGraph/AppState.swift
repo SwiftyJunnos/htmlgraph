@@ -163,14 +163,6 @@ struct VaultSecurityStore {
     }
 }
 
-/// Which kind of sidebar search the query field performs.
-enum SearchMode: Hashable {
-    /// Lexical substring match on title/path (instant, always available).
-    case title
-    /// On-device semantic (meaning) search over the embedding index.
-    case meaning
-}
-
 /// Lifecycle of the on-device semantic index for the current vault.
 enum SemanticIndexState: Equatable {
     /// No vault open / nothing built yet.
@@ -288,9 +280,6 @@ final class AppState: ObservableObject {
     /// publish a stale index (mirrors `indexingGeneration` for the lexical index).
     private var embeddingGeneration = UUID()
 
-    /// Sidebar search mode. Lexical (`.title`) is the instant default; `.meaning`
-    /// runs the on-device semantic search.
-    @Published var searchMode: SearchMode = .title
     /// Ranked semantic hits for the current query, mapped back to documents.
     @Published private(set) var semanticResults: [DocumentNode] = []
     /// True while a semantic query is being embedded/ranked (drives the quiet
@@ -687,14 +676,15 @@ final class AppState: ObservableObject {
     }
 
     /// Debounced semantic query: embeds the query off-main, cosine+centrality ranks it
-    /// against the current embedding index, and publishes the matching documents.
-    /// Generation-guarded so a stale keystroke's results are dropped. A no-op (clears
-    /// results) outside `.meaning` mode, with an empty query, or without a ready index.
+    /// against the current embedding index, and publishes the matching documents. Runs on
+    /// every query alongside the lexical title search (the sidebar shows both as separate
+    /// sections). Generation-guarded so a stale keystroke's results are dropped. A no-op
+    /// (clears results) with an empty query or without a ready index.
     func runSemanticSearch() {
         searchTask?.cancel()
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard searchMode == .meaning, !query.isEmpty,
+        guard !query.isEmpty,
               let embeddingIndex, let graph = index, let indexer = makeSemanticIndexer() else {
             withoutSearchAnimation {
                 semanticResults = []
