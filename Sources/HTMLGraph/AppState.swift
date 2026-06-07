@@ -163,14 +163,6 @@ struct VaultSecurityStore {
     }
 }
 
-/// Which kind of sidebar search the query field performs.
-enum SearchMode: Hashable {
-    /// Lexical substring match on title/path (instant, always available).
-    case title
-    /// On-device semantic (meaning) search over the embedding index.
-    case meaning
-}
-
 /// Lifecycle of the on-device semantic index for the current vault.
 enum SemanticIndexState: Equatable {
     /// No vault open / nothing built yet.
@@ -288,9 +280,6 @@ final class AppState: ObservableObject {
     /// publish a stale index (mirrors `indexingGeneration` for the lexical index).
     private var embeddingGeneration = UUID()
 
-    /// Sidebar search mode. Lexical (`.title`) is the instant default; `.meaning`
-    /// runs the on-device semantic search.
-    @Published var searchMode: SearchMode = .title
     /// Ranked semantic hits for the current query, mapped back to documents.
     @Published private(set) var semanticResults: [DocumentNode] = []
     /// True while a semantic query is being embedded/ranked (drives the quiet
@@ -686,36 +675,66 @@ final class AppState: ObservableObject {
         return SemanticIndexer(provider: embeddingProvider, store: embeddingStore)
     }
 
+    /// Shortest query that runs a semantic pass. Embedding a 1-character query is mostly
+    /// noise for the cost, and the instant lexical title section already covers that intent
+    /// — so the Meaning section stays quiet until there's at least this much signal. Counted
+    /// in grapheme clusters, so one Hangul syllable counts as one (a 2-syllable Korean query
+    /// or a 2-letter Latin query both qualify).
+    private static let minimumSemanticQueryLength = 2
+
     /// Debounced semantic query: embeds the query off-main, cosine+centrality ranks it
-    /// against the current embedding index, and publishes the matching documents.
-    /// Generation-guarded so a stale keystroke's results are dropped. A no-op (clears
-    /// results) outside `.meaning` mode, with an empty query, or without a ready index.
+    /// against the current embedding index, and publishes the matching documents. Runs
+    /// alongside the lexical title search (the sidebar shows both as separate sections) for
+    /// queries of at least `minimumSemanticQueryLength`. Generation-guarded so a stale
+    /// keystroke's results are dropped. A no-op (clears results) for shorter queries or
+    /// without a ready index.
     func runSemanticSearch() {
         searchTask?.cancel()
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard searchMode == .meaning, !query.isEmpty,
+        guard query.count >= Self.minimumSemanticQueryLength,
               let embeddingIndex, let graph = index, let indexer = makeSemanticIndexer() else {
-            semanticResults = []
-            isSearchingSemantically = false
+            withoutSearchAnimation {
+                semanticResults = []
+                isSearchingSemantically = false
+            }
             return
         }
 
         let generation = UUID()
         searchGeneration = generation
-        isSearchingSemantically = true
 
         searchTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 250_000_000) // debounce keystrokes
             if Task.isCancelled { return }
+            // Flip the "searching" flag only after the debounce survives, so keystrokes that
+            // are superseded mid-burst never cause a list relayout. Fewer relayouts while
+            // typing means fewer chances for the row animation to strand an overlapping row.
+            await MainActor.run {
+                guard let self, self.searchGeneration == generation else { return }
+                self.withoutSearchAnimation { self.isSearchingSemantically = true }
+            }
             let hits = (try? await indexer.search(query: query, in: embeddingIndex, graph: graph, topK: 50)) ?? []
             await MainActor.run {
                 guard let self, self.searchGeneration == generation else { return }
                 let byId = Dictionary(self.index?.documents.map { ($0.id, $0) } ?? [], uniquingKeysWith: { first, _ in first })
-                self.semanticResults = hits.compactMap { byId[$0.documentId] }
-                self.isSearchingSemantically = false
+                self.withoutSearchAnimation {
+                    self.semanticResults = hits.compactMap { byId[$0.documentId] }
+                    self.isSearchingSemantically = false
+                }
             }
         }
+    }
+
+    /// Publishes search-state mutations without SwiftUI's implicit list animation. The
+    /// sidebar's `List(.sidebar)` is backed by an AppKit outline view that animates row
+    /// insert/remove; when the result set churns faster than the animation settles, an
+    /// outgoing and an incoming row briefly share one row frame and render overlapping.
+    /// Disabling the animation at the mutation source makes the re-diff snap instead.
+    private func withoutSearchAnimation(_ body: () -> Void) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction, body)
     }
 
     /// Rebuilds the whole semantic index off-main after a full reindex. Re-embeds only

@@ -10,16 +10,11 @@ struct ContentView: View {
         NavigationSplitView {
             VaultSidebar()
                 .searchable(text: $appState.searchText, placement: .sidebar, prompt: "Search documents")
-                // Native scope bar under the search field — quiet, macOS-conventional.
-                // "Title" is lexical (instant); "Meaning" runs on-device semantic search.
-                .searchScopes($appState.searchMode) {
-                    Text("Title").tag(SearchMode.title)
-                    Text("Meaning").tag(SearchMode.meaning)
-                }
-                // Re-run semantic search when the query or mode changes (debounced and
-                // generation-guarded inside AppState; a no-op outside Meaning mode).
+                // Lexical (title) and semantic (meaning) search now run together and render as
+                // two sidebar sections, so there's no Title/Meaning scope toggle. Re-run the
+                // semantic pass on every query change (debounced + generation-guarded inside
+                // AppState; clears itself for an empty query).
                 .onChange(of: appState.searchText) { _, _ in appState.runSemanticSearch() }
-                .onChange(of: appState.searchMode) { _, _ in appState.runSemanticSearch() }
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
         } detail: {
             ReaderPane {

@@ -35,6 +35,14 @@ struct VaultSidebar: View {
             documentsSection
         }
         .listStyle(.sidebar)
+        // Suppress the implicit row insert/remove animation while a query churns the result
+        // set. The sidebar's NSOutlineView-backed List otherwise animates an outgoing and an
+        // incoming row through the same frame, so two rows momentarily render overlapping —
+        // search results don't need to animate into place. (Reinforced at the mutation source
+        // in AppState.withoutSearchAnimation for the async Meaning-mode publishes.)
+        .animation(nil, value: appState.searchText)
+        .animation(nil, value: appState.semanticResults)
+        .animation(nil, value: appState.isSearchingSemantically)
         // Vault-wide actions for right-clicking empty sidebar space. Row context menus
         // take precedence over this for their own rows.
         .contextMenu {
@@ -52,12 +60,13 @@ struct VaultSidebar: View {
     @ViewBuilder
     private var documentsSection: some View {
         if isSearching {
-            // Flat results while searching, so a match can't hide inside a collapsed folder.
-            if appState.searchMode == .meaning {
-                semanticResultsSection
-            } else {
-                lexicalResultsSection
-            }
+            // Two stable sections while searching: instant Title (lexical) matches on top, and
+            // below them the on-device Meaning (semantic) suggestions the title search didn't
+            // already surface — a "did you mean this document?" affordance. Both sections stay
+            // present as the query refines (only their rows diff), which together with the
+            // List's animation suppression keeps rows from being animated through one frame.
+            titleResultsSection
+            meaningSuggestionsSection
         } else if !appState.documentTree.isEmpty {
             Section("Documents") {
                 DocumentTreeRows(nodes: appState.documentTree, collapsedFolders: $collapsedFolders)
@@ -66,7 +75,7 @@ struct VaultSidebar: View {
     }
 
     @ViewBuilder
-    private var lexicalResultsSection: some View {
+    private var titleResultsSection: some View {
         Section("Documents") {
             if appState.filteredDocuments.isEmpty {
                 Text("No matches").foregroundStyle(.secondary)
@@ -79,31 +88,38 @@ struct VaultSidebar: View {
     }
 
     @ViewBuilder
-    private var semanticResultsSection: some View {
-        Section("Documents") {
-            switch appState.semanticIndexState {
-            case .unavailable:
-                // No on-device model/assets — fall back to lexical, transparently.
-                ForEach(appState.filteredDocuments) { document in
-                    documentRow(document)
-                }
-                Text("Meaning search unavailable — showing title matches.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            case .ready:
-                if appState.isSearchingSemantically {
-                    Text("Searching…").foregroundStyle(.secondary)
-                } else if appState.semanticResults.isEmpty {
-                    Text("No matches").foregroundStyle(.secondary)
-                } else {
-                    ForEach(appState.semanticResults) { document in
-                        documentRow(document)
+    private var meaningSuggestionsSection: some View {
+        // Only meaningful once the on-device index is ready (so .unavailable / preparing stays
+        // quiet — the title section already answers the query). Shown only when it has
+        // suggestions the title search missed, or while a query is still being ranked.
+        if appState.semanticIndexState == .ready {
+            let suggestions = semanticSuggestions
+            if !suggestions.isEmpty || appState.isSearchingSemantically {
+                Section {
+                    if suggestions.isEmpty {
+                        Text("Searching…").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(suggestions) { document in
+                            documentRow(document)
+                        }
+                    }
+                } header: {
+                    HStack(spacing: 6) {
+                        Text("이 문서를 찾고 있나요?")
+                        if appState.isSearchingSemantically {
+                            ProgressView().controlSize(.small)
+                        }
                     }
                 }
-            case .idle, .preparingAssets, .building:
-                Text("Preparing meaning search…").foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Semantic hits the lexical title search didn't already surface, so the Meaning section
+    /// adds documents rather than repeating the ones already listed above it.
+    private var semanticSuggestions: [DocumentNode] {
+        let titleIds = Set(appState.filteredDocuments.map(\.id))
+        return appState.semanticResults.filter { !titleIds.contains($0.id) }
     }
 
     @ViewBuilder
