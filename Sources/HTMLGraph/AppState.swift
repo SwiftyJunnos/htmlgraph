@@ -749,21 +749,17 @@ final class AppState: ObservableObject {
         embeddingGeneration = generation
         semanticIndexState = .building(progress: 0)
 
-        Task.detached(priority: .utility) { [weak self] in
+        Task(priority: .utility) { [weak self, indexer, index, vaultURL, generation] in
             do {
                 let result = try await indexer.refresh(index: index, vaultURL: vaultURL)
-                await MainActor.run {
-                    guard let self, self.embeddingGeneration == generation else { return }
-                    self.embeddingIndex = result
-                    self.semanticIndexState = .ready
-                }
+                guard let self, self.embeddingGeneration == generation else { return }
+                self.embeddingIndex = result
+                self.semanticIndexState = .ready
             } catch {
-                await MainActor.run {
-                    guard let self, self.embeddingGeneration == generation else { return }
-                    self.embeddingIndex = nil
-                    self.semanticIndexState = .unavailable
-                    Self.embeddingLogger.error("embedding refresh failed: \(error.localizedDescription, privacy: .public)")
-                }
+                guard let self, self.embeddingGeneration == generation else { return }
+                self.embeddingIndex = nil
+                self.semanticIndexState = .unavailable
+                Self.embeddingLogger.error("embedding refresh failed: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -778,20 +774,16 @@ final class AppState: ObservableObject {
         let generation = UUID()
         embeddingGeneration = generation
 
-        Task.detached(priority: .utility) { [weak self] in
+        Task(priority: .utility) { [weak self, indexer, document, documentId, vaultURL, generation] in
             do {
                 let record = try await indexer.embedRecord(for: document)
-                await MainActor.run {
-                    guard let self, self.embeddingGeneration == generation,
-                          var current = self.embeddingIndex else { return }
-                    current.entries[documentId] = record
-                    self.embeddingIndex = current
-                    self.persistEmbeddingIndex(to: vaultURL)
-                }
+                guard let self, self.embeddingGeneration == generation,
+                      var current = self.embeddingIndex else { return }
+                current.entries[documentId] = record
+                self.embeddingIndex = current
+                self.persistEmbeddingIndex(to: vaultURL)
             } catch {
-                await MainActor.run {
-                    Self.embeddingLogger.error("incremental embedding failed: \(error.localizedDescription, privacy: .public)")
-                }
+                Self.embeddingLogger.error("incremental embedding failed: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
