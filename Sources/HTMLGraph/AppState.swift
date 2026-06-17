@@ -537,8 +537,8 @@ final class AppState: ObservableObject {
 
         vaultBaseURL = nil
         previewServerFailed = false
-        httpServer.start(vaultURL: url) { base in
-            Task { @MainActor [weak self] in
+        httpServer.start(vaultURL: url) { [weak self] base in
+            Task { @MainActor in
                 guard let self, self.vaultURL == url else { return }
                 self.vaultBaseURL = base
                 // Tracked separately from errorMessage so a successful index doesn't
