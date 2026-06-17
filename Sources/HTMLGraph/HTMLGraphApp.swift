@@ -57,6 +57,22 @@ struct HTMLGraphApp: App {
                 .disabled(appState.recentVaults.isEmpty)
 
                 Toggle("Reopen Last Vault on Launch", isOn: $autoReopenLastVault)
+
+                Divider()
+
+                // Regenerate the vault's AGENTS.md / CLAUDE.md from the current template.
+                // Created automatically (create-only) on open; this is the deliberate
+                // refresh, so it confirms first — the rewrite clobbers any manual edits.
+                Button("Regenerate Agent Guide…") {
+                    let alert = NSAlert()
+                    alert.messageText = "Regenerate AGENTS.md and CLAUDE.md?"
+                    alert.informativeText = "This rewrites the agent-guide files at the vault root with HTMLGraph’s current template. Any manual edits to them will be lost."
+                    alert.addButton(withTitle: "Regenerate")
+                    alert.addButton(withTitle: "Cancel")
+                    guard alert.runModal() == .alertFirstButtonReturn else { return }
+                    appState.regenerateAgentGuide()
+                }
+                .disabled(appState.vaultURL == nil)
             }
         }
 
