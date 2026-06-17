@@ -61,6 +61,7 @@ struct ContentView: View {
                         Button("New Document…") { SidebarActions.newDocument(inFolder: nil, appState: appState) }
                         Button("New Folder…") { SidebarActions.newFolder(inParent: nil, appState: appState) }
                         Divider()
+                        Button("Export Web Site…") { exportWebSite() }
                         Button("Reveal Vault in Finder") {
                             if let path = appState.vaultURL?.path { SidebarCommands.reveal(absolutePath: path) }
                         }
@@ -104,11 +105,39 @@ struct ContentView: View {
         } message: {
             Text(appState.errorMessage ?? "")
         }
+        .alert("Web Site Exported", isPresented: Binding(
+            get: { appState.exportedSiteURL != nil },
+            set: { isPresented in
+                if !isPresented {
+                    appState.exportedSiteURL = nil
+                }
+            }
+        )) {
+            Button("Reveal") {
+                if let path = appState.exportedSiteURL?.path {
+                    SidebarCommands.reveal(absolutePath: path)
+                }
+                appState.exportedSiteURL = nil
+            }
+            Button("OK", role: .cancel) {
+                appState.exportedSiteURL = nil
+            }
+        } message: {
+            Text("Upload this folder to a static host such as GitHub Pages, Netlify, or S3.")
+        }
     }
 
     private func chooseVault() {
         guard EditorGuard.confirmLeavingEditor(appState) else { return }
         appState.chooseAndOpenVault()
+    }
+
+    private func exportWebSite() {
+        guard EditorGuard.confirmLeavingEditor(appState),
+              let destinationURL = VaultFolderPicker.chooseStaticSiteExportFolder() else {
+            return
+        }
+        appState.exportStaticSite(to: destinationURL)
     }
 
     private func acceptInboxItem(_ item: InboxItem) {

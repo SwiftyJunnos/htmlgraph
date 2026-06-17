@@ -211,6 +211,7 @@ final class AppState: ObservableObject {
         }
     }
     @Published var errorMessage: String?
+    @Published var exportedSiteURL: URL?
     /// Set when the current document was prevented from loading remote content
     /// because the vault has network access turned off. Drives the in-reader
     /// "Allow Network Access" banner; cleared on selection change and when granted.
@@ -676,6 +677,23 @@ final class AppState: ObservableObject {
         isIndexing = false
         indexingTask = nil
         pendingSelectionId = nil
+    }
+
+    // MARK: - Static web export
+
+    func exportStaticSite(to destinationURL: URL) {
+        guard let vaultURL else { return }
+        exportedSiteURL = nil
+        guard let index else {
+            errorMessage = "Wait for indexing to finish before exporting."
+            return
+        }
+
+        do {
+            exportedSiteURL = try VaultStaticSiteExporter().export(index: index, vaultURL: vaultURL, to: destinationURL)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     // MARK: - Agent guide
