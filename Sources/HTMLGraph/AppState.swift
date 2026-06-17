@@ -180,6 +180,7 @@ enum SemanticIndexState: Equatable {
 @MainActor
 final class AppState: ObservableObject {
     private static let exportLogger = Logger(subsystem: "com.junnos.htmlgraph", category: "VaultIndexExport")
+    private static let agentGuideLogger = Logger(subsystem: "com.junnos.htmlgraph", category: "AgentGuide")
     private nonisolated static let embeddingLogger = Logger(subsystem: "com.junnos.htmlgraph", category: "SemanticIndex")
 
     @Published var vaultURL: URL?
@@ -639,6 +640,15 @@ final class AppState: ObservableObject {
                 } catch {
                     Self.exportLogger.error("graph.json export failed: \(error.localizedDescription, privacy: .public)")
                 }
+                // Best-effort, create-only: drop AGENTS.md / CLAUDE.md at the vault root so
+                // AI coding agents that open this folder know it's an HTMLGraph vault and how
+                // to work in it. Never overwrites existing files (preserving user edits) and,
+                // like the graph export, never breaks indexing or touches errorMessage.
+                do {
+                    try VaultAgentGuideWriter().writeIfMissing(vaultURL: vaultURL)
+                } catch {
+                    Self.agentGuideLogger.error("agent guide write failed: \(error.localizedDescription, privacy: .public)")
+                }
                 // Best-effort, off-main: refresh the on-device semantic index. Never
                 // blocks indexing (exactly like the graph.json export above).
                 rebuildEmbeddingIndex(for: builtIndex, vaultURL: vaultURL)
@@ -666,6 +676,27 @@ final class AppState: ObservableObject {
         isIndexing = false
         indexingTask = nil
         pendingSelectionId = nil
+    }
+
+    // MARK: - Agent guide
+
+    /// Force-rewrites the vault's `AGENTS.md` / `CLAUDE.md` from HTMLGraph's current
+    /// template — the explicit counterpart to the create-only write that runs on open.
+    /// Overwrites any manual edits, so the UI confirms before calling this. Returns
+    /// `true` on success. Failures surface via `errorMessage` (a successful reindex
+    /// clears it, which is fine for a transient write error).
+    @discardableResult
+    func regenerateAgentGuide() -> Bool {
+        guard let vaultURL else { return false }
+        do {
+            try VaultAgentGuideWriter().regenerate(vaultURL: vaultURL)
+            Self.agentGuideLogger.info("regenerated agent guide for vault")
+            return true
+        } catch {
+            Self.agentGuideLogger.error("agent guide regenerate failed: \(error.localizedDescription, privacy: .public)")
+            errorMessage = "Couldn’t regenerate the agent guide: \(error.localizedDescription)"
+            return false
+        }
     }
 
     // MARK: - Semantic index lifecycle (Phase 0.2)
