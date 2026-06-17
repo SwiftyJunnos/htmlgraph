@@ -23,11 +23,7 @@ public struct VaultAgentGuideWriter {
     public static let agentsFileName = "AGENTS.md"
     public static let claudeFileName = "CLAUDE.md"
 
-    private let fileManager: FileManager
-
-    public init(fileManager: FileManager = .default) {
-        self.fileManager = fileManager
-    }
+    public init() {}
 
     /// Location of the full agent guide for a given vault.
     public static func agentsFileURL(forVault vaultURL: URL) -> URL {
@@ -59,21 +55,24 @@ public struct VaultAgentGuideWriter {
     /// `CLAUDE.md` still gets an `AGENTS.md`.
     @discardableResult
     public func writeIfMissing(vaultURL: URL) throws -> Outcome {
-        var outcome = Outcome(wroteAgents: false, wroteClaude: false)
+        Outcome(
+            wroteAgents: try Self.createOnly(Self.agentsGuide, at: Self.agentsFileURL(forVault: vaultURL)),
+            wroteClaude: try Self.createOnly(Self.claudePointer, at: Self.claudeFileURL(forVault: vaultURL))
+        )
+    }
 
-        let agentsURL = Self.agentsFileURL(forVault: vaultURL)
-        if !fileManager.fileExists(atPath: agentsURL.path) {
-            try Self.agentsGuide.write(to: agentsURL, atomically: true, encoding: .utf8)
-            outcome.wroteAgents = true
+    /// Writes `contents` only when nothing exists at `url`; returns whether it created the
+    /// file. Uses `.withoutOverwriting` instead of a `fileExists` pre-check so the
+    /// create-only guarantee has no time-of-check/time-of-use race — the write itself
+    /// fails (leaving any existing file untouched) when a file is already there, which we
+    /// translate to "skipped". Other write errors propagate to the best-effort caller.
+    private static func createOnly(_ contents: String, at url: URL) throws -> Bool {
+        do {
+            try Data(contents.utf8).write(to: url, options: .withoutOverwriting)
+            return true
+        } catch let error as CocoaError where error.code == .fileWriteFileExists {
+            return false
         }
-
-        let claudeURL = Self.claudeFileURL(forVault: vaultURL)
-        if !fileManager.fileExists(atPath: claudeURL.path) {
-            try Self.claudePointer.write(to: claudeURL, atomically: true, encoding: .utf8)
-            outcome.wroteClaude = true
-        }
-
-        return outcome
     }
 
     /// Force-overwrites both guide files with the current templates — the "Regenerate"
