@@ -43,7 +43,7 @@ public enum GitHubDeviceFlowError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .missingClientID:
-            return "GitHub App Client ID is required."
+            return "GitHub sign-in is not available in this build. Use a personal access token instead."
         case .authorizationPending:
             return "Waiting for GitHub authorization."
         case .slowDown:
@@ -69,13 +69,17 @@ public struct GitHubDeviceFlowClient {
         self.session = session
     }
 
-    public func requestDeviceCode(clientID: String) async throws -> GitHubOAuthDeviceCode {
+    public func requestDeviceCode(clientID: String, scope: String = "") async throws -> GitHubOAuthDeviceCode {
         let clientID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clientID.isEmpty else { throw GitHubDeviceFlowError.missingClientID }
 
+        var form = ["client_id": clientID]
+        let scope = scope.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !scope.isEmpty { form["scope"] = scope }
+
         let response: DeviceCodeResponse = try await send(
             "https://github.com/login/device/code",
-            form: ["client_id": clientID]
+            form: form
         )
         guard let verificationURI = URL(string: response.verificationURI) else {
             throw GitHubDeviceFlowError.invalidResponse

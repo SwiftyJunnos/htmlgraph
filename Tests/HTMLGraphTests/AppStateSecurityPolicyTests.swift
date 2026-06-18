@@ -96,26 +96,64 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertTrue(appState.allowsNetworkAccess)
     }
 
-    func testGitHubOAuthConnectionStateFollowsClientID() throws {
-        let (defaults, suite) = scratchDefaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let settings = GitHubOAuthSettingsStore(defaults: defaults)
+    func testGitHubOAuthConnectionStateUsesBundledClientID() throws {
         let credentials = InMemoryGitHubCredentialStore()
-        settings.save(clientID: "client-a")
         try credentials.save(GitHubOAuthToken(accessToken: "token-a"), clientID: "client-a")
 
-        let appState = AppState(githubOAuthSettingsStore: settings, githubCredentialStore: credentials)
+        let appState = AppState(githubCredentialStore: credentials, githubOAuthClientID: " client-a ")
 
+        XCTAssertEqual(appState.githubOAuthClientID, "client-a")
         XCTAssertTrue(appState.hasGitHubOAuthToken)
-        appState.githubOAuthClientID = "client-b"
-        XCTAssertFalse(appState.hasGitHubOAuthToken)
-        appState.githubOAuthClientID = "client-a"
-        XCTAssertTrue(appState.hasGitHubOAuthToken)
+        XCTAssertTrue(appState.isGitHubOAuthConfigured)
+    }
+
+    func testGitHubRepositoryRefreshIgnoresStaleCompletion() async throws {
+        let credentials = InMemoryGitHubCredentialStore()
+        try credentials.save(GitHubOAuthToken(accessToken: "token-a"), clientID: "client-a")
+        let probe = GitHubRepositoryLoaderProbe()
+        let appState = AppState(
+            githubCredentialStore: credentials,
+            githubOAuthClientID: "client-a",
+            githubRepositoryLoader: { token in
+                try await probe.load(token: token)
+            }
+        )
+
+        appState.refreshGitHubRepositories()
+        await probe.waitForCalls(1)
+        appState.refreshGitHubRepositories()
+        await probe.waitForCalls(2)
+
+        let fresh = [GitHubRepository(owner: "octocat", name: "fresh", fullName: "octocat/fresh")]
+        await probe.resolveCall(1, repositories: fresh)
+        try await waitUntil {
+            appState.githubRepositories == fresh && !appState.isLoadingGitHubRepositories
+        }
+
+        await probe.resolveCall(0, repositories: [
+            GitHubRepository(owner: "octocat", name: "stale", fullName: "octocat/stale")
+        ])
+        try await Task.sleep(nanoseconds: 10_000_000)
+
+        XCTAssertEqual(appState.githubRepositories, fresh)
+        XCTAssertFalse(appState.isLoadingGitHubRepositories)
     }
 
     private func scratchDefaults() -> (UserDefaults, String) {
         let suite = "AppStateSecurityTests-\(UUID().uuidString)"
         return (UserDefaults(suiteName: suite)!, suite)
+    }
+
+    private func waitUntil(
+        _ condition: () -> Bool,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws {
+        for _ in 0..<100 {
+            if condition() { return }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTFail("Timed out waiting for condition.", file: file, line: line)
     }
 
     func testVaultStatusPresentationReflectsClosedIndexingAndOpenStates() {
@@ -321,6 +359,26 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         }
 
         return rootURL
+    }
+}
+
+private actor GitHubRepositoryLoaderProbe {
+    private var continuations: [CheckedContinuation<[GitHubRepository], any Error>] = []
+
+    func load(token: String) async throws -> [GitHubRepository] {
+        try await withCheckedThrowingContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func waitForCalls(_ count: Int) async {
+        while continuations.count < count {
+            await Task.yield()
+        }
+    }
+
+    func resolveCall(_ index: Int, repositories: [GitHubRepository]) {
+        continuations[index].resume(returning: repositories)
     }
 }
 

@@ -227,23 +227,34 @@ private struct GitHubPagesDeploySheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @State private var selectedRepository = ""
     @State private var owner = ""
     @State private var repo = ""
     @State private var branch = "gh-pages"
     @State private var token = ""
 
     private var canConnectGitHub: Bool {
-        !appState.githubOAuthClientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !appState.isConnectingGitHub
+        appState.isGitHubOAuthConfigured && !appState.isConnectingGitHub
     }
 
     private var hasDeploymentAuth: Bool {
         appState.hasGitHubOAuthToken || !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var selectedGitHubRepository: GitHubRepository? {
+        appState.githubRepositories.first { $0.fullName == selectedRepository }
+    }
+
+    private var usesTokenFallback: Bool {
+        !appState.isGitHubOAuthConfigured
+    }
+
     private var canDeploy: Bool {
-        !owner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !repo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        let hasRepository = usesTokenFallback
+            ? !owner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !repo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            : selectedGitHubRepository != nil
+
+        return hasRepository &&
             !branch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             hasDeploymentAuth &&
             !appState.isDeployingStaticSite
@@ -253,15 +264,6 @@ private struct GitHubPagesDeploySheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Deploy to GitHub Pages")
                 .font(.headline)
-
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
-                GridRow {
-                    Text("Client ID")
-                    TextField("GitHub App client ID", text: $appState.githubOAuthClientID)
-                }
-            }
-            .textFieldStyle(.roundedBorder)
-            .disabled(appState.isConnectingGitHub || appState.isDeployingStaticSite)
 
             HStack(spacing: 10) {
                 if appState.hasGitHubOAuthToken {
@@ -274,11 +276,14 @@ private struct GitHubPagesDeploySheet: View {
                     Text("Waiting for GitHub")
                         .foregroundStyle(.secondary)
                     Button("Cancel") { appState.cancelGitHubDeviceFlow() }
-                } else {
-                    Button("Connect GitHub") {
-                        appState.startGitHubDeviceFlow(clientID: appState.githubOAuthClientID)
+                } else if appState.isGitHubOAuthConfigured {
+                    Button("Sign in to GitHub") {
+                        appState.startGitHubDeviceFlow()
                     }
                     .disabled(!canConnectGitHub)
+                } else {
+                    Text("GitHub sign-in is not available in this build. Use a token below.")
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -292,26 +297,54 @@ private struct GitHubPagesDeploySheet: View {
 
             Divider()
 
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
-                GridRow {
-                    Text("Owner")
-                    TextField("octocat", text: $owner)
+            if appState.hasGitHubOAuthToken {
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                    GridRow {
+                        Text("Repository")
+                        if appState.isLoadingGitHubRepositories {
+                            ProgressView("Loading repositories…")
+                        } else if appState.githubRepositories.isEmpty {
+                            Text("No writable repositories found.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Picker("Repository", selection: $selectedRepository) {
+                                Text("Choose repository").tag("")
+                                ForEach(appState.githubRepositories) { repository in
+                                    Text(repository.fullName).tag(repository.fullName)
+                                }
+                            }
+                            .labelsHidden()
+                        }
+                    }
+                    GridRow {
+                        Text("Branch")
+                        TextField("gh-pages", text: $branch)
+                    }
                 }
-                GridRow {
-                    Text("Repository")
-                    TextField("my-vault", text: $repo)
+                .textFieldStyle(.roundedBorder)
+                .disabled(appState.isDeployingStaticSite)
+            } else if !appState.isGitHubOAuthConfigured {
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                    GridRow {
+                        Text("Owner")
+                        TextField("octocat", text: $owner)
+                    }
+                    GridRow {
+                        Text("Repository")
+                        TextField("my-vault", text: $repo)
+                    }
+                    GridRow {
+                        Text("Branch")
+                        TextField("gh-pages", text: $branch)
+                    }
+                    GridRow {
+                        Text("Token")
+                        SecureField("Personal access token", text: $token)
+                    }
                 }
-                GridRow {
-                    Text("Branch")
-                    TextField("gh-pages", text: $branch)
-                }
-                GridRow {
-                    Text("Token")
-                    SecureField("Optional PAT fallback", text: $token)
-                }
+                .textFieldStyle(.roundedBorder)
+                .disabled(appState.isDeployingStaticSite)
             }
-            .textFieldStyle(.roundedBorder)
-            .disabled(appState.isDeployingStaticSite)
 
             if appState.isDeployingStaticSite {
                 ProgressView("Deploying…")
@@ -323,8 +356,8 @@ private struct GitHubPagesDeploySheet: View {
                 Button("Cancel") { dismiss() }
                     .disabled(appState.isDeployingStaticSite)
                 Button("Deploy") {
-                    if token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        appState.deployStaticSiteToGitHubPages(owner: owner, repo: repo, branch: branch)
+                    if let repository = selectedGitHubRepository {
+                        appState.deployStaticSiteToGitHubPages(owner: repository.owner, repo: repository.name, branch: branch)
                     } else {
                         appState.deployStaticSiteToGitHubPages(
                             config: GitHubPagesDeploymentConfig(
@@ -341,9 +374,24 @@ private struct GitHubPagesDeploySheet: View {
             }
         }
         .padding(18)
-        .frame(width: 460)
+        .frame(width: 520)
+        .onAppear {
+            if appState.hasGitHubOAuthToken, appState.githubRepositories.isEmpty {
+                appState.refreshGitHubRepositories()
+            }
+        }
         .onChange(of: appState.githubDeviceCode) { _, code in
             if let code { openURL(code.verificationURI) }
+        }
+        .onChange(of: appState.hasGitHubOAuthToken) { _, connected in
+            if !connected {
+                selectedRepository = ""
+            }
+        }
+        .onChange(of: appState.githubRepositories) { _, repositories in
+            if selectedRepository.isEmpty {
+                selectedRepository = repositories.first?.fullName ?? ""
+            }
         }
         .onDisappear {
             appState.cancelGitHubDeviceFlow()
