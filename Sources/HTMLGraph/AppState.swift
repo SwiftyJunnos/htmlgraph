@@ -234,6 +234,9 @@ final class AppState: ObservableObject {
     @Published var githubOAuthClientID: String {
         didSet {
             let clientID = githubOAuthClientID.trimmingCharacters(in: .whitespacesAndNewlines)
+            if oldValue.trimmingCharacters(in: .whitespacesAndNewlines) != clientID {
+                cancelGitHubDeviceFlow()
+            }
             githubOAuthSettingsStore.save(clientID: clientID)
             hasGitHubOAuthToken = githubCredentialStore.load(clientID: clientID) != nil
         }
@@ -280,6 +283,7 @@ final class AppState: ObservableObject {
     private var indexingTask: Task<Void, Never>?
     private var inboxPollingTask: Task<Void, Never>?
     private var githubConnectionTask: Task<Void, Never>?
+    private var githubConnectionGeneration = UUID()
     private var indexingGeneration = UUID()
 
     /// The single folder we currently hold a security-scoped access claim on.
@@ -745,26 +749,49 @@ final class AppState: ObservableObject {
         githubConnectionTask?.cancel()
         githubDeviceCode = nil
         isConnectingGitHub = true
+        githubConnectionGeneration = UUID()
+        let generation = githubConnectionGeneration
 
-        githubConnectionTask = Task { [weak self, clientID] in
+        githubConnectionTask = Task { [weak self, clientID, generation] in
             do {
                 let client = GitHubDeviceFlowClient()
                 let code = try await client.requestDeviceCode(clientID: clientID)
+                try self?.checkCurrentGitHubConnection(clientID: clientID, generation: generation)
                 self?.githubDeviceCode = code
                 let token = try await client.waitForAccessToken(clientID: clientID, deviceCode: code)
+                try self?.checkCurrentGitHubConnection(clientID: clientID, generation: generation)
                 try self?.githubCredentialStore.save(token, clientID: clientID)
                 self?.hasGitHubOAuthToken = true
                 self?.githubDeviceCode = nil
             } catch is CancellationError {
             } catch {
-                self?.errorMessage = error.localizedDescription
+                if self?.isCurrentGitHubConnection(clientID: clientID, generation: generation) == true {
+                    self?.errorMessage = error.localizedDescription
+                }
             }
-            self?.isConnectingGitHub = false
-            self?.githubConnectionTask = nil
+            self?.finishGitHubConnection(generation: generation)
         }
     }
 
+    private func isCurrentGitHubConnection(clientID: String, generation: UUID) -> Bool {
+        githubConnectionGeneration == generation &&
+            githubOAuthClientID.trimmingCharacters(in: .whitespacesAndNewlines) == clientID
+    }
+
+    private func checkCurrentGitHubConnection(clientID: String, generation: UUID) throws {
+        guard isCurrentGitHubConnection(clientID: clientID, generation: generation) else {
+            throw CancellationError()
+        }
+    }
+
+    private func finishGitHubConnection(generation: UUID) {
+        guard githubConnectionGeneration == generation else { return }
+        isConnectingGitHub = false
+        githubConnectionTask = nil
+    }
+
     func cancelGitHubDeviceFlow() {
+        githubConnectionGeneration = UUID()
         githubConnectionTask?.cancel()
         githubConnectionTask = nil
         githubDeviceCode = nil
