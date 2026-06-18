@@ -226,16 +226,26 @@ private struct SecuritySettingsView: View {
 private struct GitHubPagesDeploySheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @State private var owner = ""
     @State private var repo = ""
     @State private var branch = "gh-pages"
     @State private var token = ""
 
+    private var canConnectGitHub: Bool {
+        !appState.githubOAuthClientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !appState.isConnectingGitHub
+    }
+
+    private var hasDeploymentAuth: Bool {
+        appState.hasGitHubOAuthToken || !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var canDeploy: Bool {
         !owner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !repo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !branch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            hasDeploymentAuth &&
             !appState.isDeployingStaticSite
     }
 
@@ -243,6 +253,44 @@ private struct GitHubPagesDeploySheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Deploy to GitHub Pages")
                 .font(.headline)
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                GridRow {
+                    Text("Client ID")
+                    TextField("GitHub App client ID", text: $appState.githubOAuthClientID)
+                }
+            }
+            .textFieldStyle(.roundedBorder)
+            .disabled(appState.isConnectingGitHub || appState.isDeployingStaticSite)
+
+            HStack(spacing: 10) {
+                if appState.hasGitHubOAuthToken {
+                    Label("GitHub connected", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Button("Disconnect") { appState.disconnectGitHub() }
+                } else if appState.isConnectingGitHub {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Waiting for GitHub")
+                        .foregroundStyle(.secondary)
+                    Button("Cancel") { appState.cancelGitHubDeviceFlow() }
+                } else {
+                    Button("Connect GitHub") {
+                        appState.startGitHubDeviceFlow(clientID: appState.githubOAuthClientID)
+                    }
+                    .disabled(!canConnectGitHub)
+                }
+            }
+
+            if let code = appState.githubDeviceCode {
+                HStack(spacing: 12) {
+                    Text(code.userCode)
+                        .font(.system(.title3, design: .monospaced).weight(.semibold))
+                    Button("Open GitHub") { openURL(code.verificationURI) }
+                }
+            }
+
+            Divider()
 
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
                 GridRow {
@@ -259,7 +307,7 @@ private struct GitHubPagesDeploySheet: View {
                 }
                 GridRow {
                     Text("Token")
-                    SecureField("GitHub token", text: $token)
+                    SecureField("Optional PAT fallback", text: $token)
                 }
             }
             .textFieldStyle(.roundedBorder)
@@ -275,21 +323,31 @@ private struct GitHubPagesDeploySheet: View {
                 Button("Cancel") { dismiss() }
                     .disabled(appState.isDeployingStaticSite)
                 Button("Deploy") {
-                    appState.deployStaticSiteToGitHubPages(
-                        config: GitHubPagesDeploymentConfig(
-                            owner: owner,
-                            repo: repo,
-                            branch: branch,
-                            token: token
+                    if token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        appState.deployStaticSiteToGitHubPages(owner: owner, repo: repo, branch: branch)
+                    } else {
+                        appState.deployStaticSiteToGitHubPages(
+                            config: GitHubPagesDeploymentConfig(
+                                owner: owner,
+                                repo: repo,
+                                branch: branch,
+                                token: token
+                            )
                         )
-                    )
+                    }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canDeploy)
             }
         }
         .padding(18)
-        .frame(width: 420)
+        .frame(width: 460)
+        .onChange(of: appState.githubDeviceCode) { _, code in
+            if let code { openURL(code.verificationURI) }
+        }
+        .onDisappear {
+            appState.cancelGitHubDeviceFlow()
+        }
         .onChange(of: appState.deployedSiteURL) { _, url in
             if url != nil { dismiss() }
         }

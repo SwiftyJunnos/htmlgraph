@@ -163,6 +163,23 @@ struct VaultSecurityStore {
     }
 }
 
+struct GitHubOAuthSettingsStore {
+    private let defaults: UserDefaults
+    private let clientIDKey = "githubOAuthClientID"
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func clientID() -> String {
+        defaults.string(forKey: clientIDKey) ?? ""
+    }
+
+    func save(clientID: String) {
+        defaults.set(clientID.trimmingCharacters(in: .whitespacesAndNewlines), forKey: clientIDKey)
+    }
+}
+
 /// Lifecycle of the on-device semantic index for the current vault.
 enum SemanticIndexState: Equatable {
     /// No vault open / nothing built yet.
@@ -214,6 +231,16 @@ final class AppState: ObservableObject {
     @Published var exportedSiteURL: URL?
     @Published var deployedSiteURL: URL?
     @Published var isDeployingStaticSite = false
+    @Published var githubOAuthClientID: String {
+        didSet {
+            let clientID = githubOAuthClientID.trimmingCharacters(in: .whitespacesAndNewlines)
+            githubOAuthSettingsStore.save(clientID: clientID)
+            hasGitHubOAuthToken = githubCredentialStore.load(clientID: clientID) != nil
+        }
+    }
+    @Published private(set) var githubDeviceCode: GitHubOAuthDeviceCode?
+    @Published private(set) var isConnectingGitHub = false
+    @Published private(set) var hasGitHubOAuthToken = false
     /// Set when the current document was prevented from loading remote content
     /// because the vault has network access turned off. Drives the in-reader
     /// "Allow Network Access" banner; cleared on selection change and when granted.
@@ -252,12 +279,15 @@ final class AppState: ObservableObject {
 
     private var indexingTask: Task<Void, Never>?
     private var inboxPollingTask: Task<Void, Never>?
+    private var githubConnectionTask: Task<Void, Never>?
     private var indexingGeneration = UUID()
 
     /// The single folder we currently hold a security-scoped access claim on.
     private var accessedVaultURL: URL?
     private let recentsStore: RecentVaultsStore
     private let securityStore: VaultSecurityStore
+    private let githubOAuthSettingsStore: GitHubOAuthSettingsStore
+    private let githubCredentialStore: any GitHubCredentialStoring
     /// True while restoring a vault's saved security posture, so the property
     /// `didSet`s don't immediately persist the value we just loaded back.
     private var isApplyingVaultSecurity = false
@@ -295,10 +325,16 @@ final class AppState: ObservableObject {
 
     init(
         recentsStore: RecentVaultsStore = RecentVaultsStore(),
-        securityStore: VaultSecurityStore = VaultSecurityStore()
+        securityStore: VaultSecurityStore = VaultSecurityStore(),
+        githubOAuthSettingsStore: GitHubOAuthSettingsStore = GitHubOAuthSettingsStore(),
+        githubCredentialStore: any GitHubCredentialStoring = GitHubCredentialStore()
     ) {
         self.recentsStore = recentsStore
         self.securityStore = securityStore
+        self.githubOAuthSettingsStore = githubOAuthSettingsStore
+        self.githubCredentialStore = githubCredentialStore
+        self.githubOAuthClientID = githubOAuthSettingsStore.clientID()
+        self.hasGitHubOAuthToken = githubCredentialStore.load(clientID: self.githubOAuthClientID) != nil
         self.recentVaults = recentsStore.load()
     }
 
@@ -698,7 +734,69 @@ final class AppState: ObservableObject {
         }
     }
 
+    func startGitHubDeviceFlow(clientID: String) {
+        let clientID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clientID.isEmpty else {
+            errorMessage = GitHubDeviceFlowError.missingClientID.localizedDescription
+            return
+        }
+
+        githubOAuthClientID = clientID
+        githubConnectionTask?.cancel()
+        githubDeviceCode = nil
+        isConnectingGitHub = true
+
+        githubConnectionTask = Task { [weak self, clientID] in
+            do {
+                let client = GitHubDeviceFlowClient()
+                let code = try await client.requestDeviceCode(clientID: clientID)
+                self?.githubDeviceCode = code
+                let token = try await client.waitForAccessToken(clientID: clientID, deviceCode: code)
+                try self?.githubCredentialStore.save(token, clientID: clientID)
+                self?.hasGitHubOAuthToken = true
+                self?.githubDeviceCode = nil
+            } catch is CancellationError {
+            } catch {
+                self?.errorMessage = error.localizedDescription
+            }
+            self?.isConnectingGitHub = false
+            self?.githubConnectionTask = nil
+        }
+    }
+
+    func cancelGitHubDeviceFlow() {
+        githubConnectionTask?.cancel()
+        githubConnectionTask = nil
+        githubDeviceCode = nil
+        isConnectingGitHub = false
+    }
+
+    func disconnectGitHub() {
+        let clientID = githubOAuthClientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        cancelGitHubDeviceFlow()
+        githubCredentialStore.delete(clientID: clientID)
+        hasGitHubOAuthToken = false
+    }
+
     func deployStaticSiteToGitHubPages(config: GitHubPagesDeploymentConfig) {
+        deployStaticSiteToGitHubPages {
+            config
+        }
+    }
+
+    func deployStaticSiteToGitHubPages(owner: String, repo: String, branch: String) {
+        let owner = owner.trimmingCharacters(in: .whitespacesAndNewlines)
+        let repo = repo.trimmingCharacters(in: .whitespacesAndNewlines)
+        let branch = branch.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        deployStaticSiteToGitHubPages { [weak self] in
+            guard let self else { throw GitHubDeviceFlowError.invalidResponse }
+            let token = try await self.githubAccessToken()
+            return GitHubPagesDeploymentConfig(owner: owner, repo: repo, branch: branch, token: token)
+        }
+    }
+
+    private func deployStaticSiteToGitHubPages(resolveConfig: @escaping @MainActor @Sendable () async throws -> GitHubPagesDeploymentConfig) {
         guard !isDeployingStaticSite else { return }
         guard let vaultURL else { return }
         guard let index else {
@@ -710,8 +808,9 @@ final class AppState: ObservableObject {
         deployedSiteURL = nil
         isDeployingStaticSite = true
 
-        Task { [weak self, vaultURL, index, config] in
+        Task { [weak self, vaultURL, index] in
             do {
+                let config = try await resolveConfig()
                 let result = try await Task.detached(priority: .userInitiated) {
                     let tempURL = FileManager.default.temporaryDirectory
                         .appendingPathComponent("HTMLGraphDeploy-\(UUID().uuidString)", isDirectory: true)
@@ -728,6 +827,22 @@ final class AppState: ObservableObject {
             }
             self?.isDeployingStaticSite = false
         }
+    }
+
+    private func githubAccessToken() async throws -> String {
+        let clientID = githubOAuthClientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clientID.isEmpty else { throw GitHubDeviceFlowError.missingClientID }
+        guard var token = githubCredentialStore.load(clientID: clientID) else { throw GitHubDeviceFlowError.accessDenied }
+
+        if let expiresAt = token.expiresAt,
+           expiresAt <= Date().addingTimeInterval(60) {
+            guard let refreshToken = token.refreshToken else { throw GitHubDeviceFlowError.expiredToken }
+            token = try await GitHubDeviceFlowClient().refreshAccessToken(clientID: clientID, refreshToken: refreshToken)
+            try githubCredentialStore.save(token, clientID: clientID)
+            hasGitHubOAuthToken = true
+        }
+
+        return token.accessToken
     }
 
     // MARK: - Agent guide

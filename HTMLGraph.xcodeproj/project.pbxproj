@@ -20,6 +20,7 @@
 		010000000000000000000110 /* VaultAgentGuideWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000E /* VaultAgentGuideWriter.swift */; };
 		010000000000000000000111 /* VaultStaticSiteExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000F /* VaultStaticSiteExporter.swift */; };
 		010000000000000000000112 /* GitHubPagesDeployer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000010 /* GitHubPagesDeployer.swift */; };
+		010000000000000000000113 /* GitHubDeviceFlowClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000023 /* GitHubDeviceFlowClient.swift */; };
 		01000000000000000000010A /* InboxAccepter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000A /* InboxAccepter.swift */; };
 		01000000000000000000010B /* InboxItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000B /* InboxItem.swift */; };
 		01000000000000000000010C /* InboxScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000C /* InboxScanner.swift */; };
@@ -41,6 +42,7 @@
 		01000000000000000000020F /* EditorSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000001F /* EditorSession.swift */; };
 		010000000000000000000210 /* DocumentSourceEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000020 /* DocumentSourceEditor.swift */; };
 		010000000000000000000211 /* VisualHTMLEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000022 /* VisualHTMLEditor.swift */; };
+		010000000000000000000212 /* GitHubCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000024 /* GitHubCredentialStore.swift */; };
 		01000000000000000000010F /* HTMLBodyReplacer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000021 /* HTMLBodyReplacer.swift */; };
 		010000000000000000000151 /* EmbeddingProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000051 /* EmbeddingProvider.swift */; };
 		010000000000000000000152 /* EmbeddingMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000052 /* EmbeddingMath.swift */; };
@@ -112,6 +114,8 @@
 		010000000000000000000020 /* DocumentSourceEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentSourceEditor.swift; sourceTree = "<group>"; };
 		010000000000000000000021 /* HTMLBodyReplacer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTMLBodyReplacer.swift; sourceTree = "<group>"; };
 		010000000000000000000022 /* VisualHTMLEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualHTMLEditor.swift; sourceTree = "<group>"; };
+		010000000000000000000023 /* GitHubDeviceFlowClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubDeviceFlowClient.swift; sourceTree = "<group>"; };
+		010000000000000000000024 /* GitHubCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubCredentialStore.swift; sourceTree = "<group>"; };
 		010000000000000000000051 /* EmbeddingProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingProvider.swift; sourceTree = "<group>"; };
 		010000000000000000000052 /* EmbeddingMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingMath.swift; sourceTree = "<group>"; };
 		010000000000000000000053 /* EmbeddingInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingInput.swift; sourceTree = "<group>"; };
@@ -189,6 +193,7 @@
 				01000000000000000000000E /* VaultAgentGuideWriter.swift */,
 				01000000000000000000000F /* VaultStaticSiteExporter.swift */,
 				010000000000000000000010 /* GitHubPagesDeployer.swift */,
+				010000000000000000000023 /* GitHubDeviceFlowClient.swift */,
 			);
 			path = HTMLGraphCore;
 			sourceTree = "<group>";
@@ -211,6 +216,7 @@
 			children = (
 				010000000000000000000011 /* AppState.swift */,
 				01000000000000000000001F /* EditorSession.swift */,
+				010000000000000000000024 /* GitHubCredentialStore.swift */,
 				010000000000000000000012 /* HTMLGraphApp.swift */,
 				01000000000000000000001D /* InboxDestinationPicker.swift */,
 				010000000000000000000013 /* VaultFolderPicker.swift */,
@@ -388,6 +394,7 @@
 				01000000000000000000020F /* EditorSession.swift in Sources */,
 				010000000000000000000210 /* DocumentSourceEditor.swift in Sources */,
 				010000000000000000000211 /* VisualHTMLEditor.swift in Sources */,
+				010000000000000000000212 /* GitHubCredentialStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -411,6 +418,7 @@
 				010000000000000000000110 /* VaultAgentGuideWriter.swift in Sources */,
 				010000000000000000000111 /* VaultStaticSiteExporter.swift in Sources */,
 				010000000000000000000112 /* GitHubPagesDeployer.swift in Sources */,
+				010000000000000000000113 /* GitHubDeviceFlowClient.swift in Sources */,
 				01000000000000000000010F /* HTMLBodyReplacer.swift in Sources */,
 				010000000000000000000151 /* EmbeddingProvider.swift in Sources */,
 				010000000000000000000152 /* EmbeddingMath.swift in Sources */,
