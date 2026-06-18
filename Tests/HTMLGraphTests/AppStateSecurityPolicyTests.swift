@@ -96,6 +96,23 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertTrue(appState.allowsNetworkAccess)
     }
 
+    func testGitHubOAuthConnectionStateFollowsClientID() throws {
+        let (defaults, suite) = scratchDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = GitHubOAuthSettingsStore(defaults: defaults)
+        let credentials = InMemoryGitHubCredentialStore()
+        settings.save(clientID: "client-a")
+        try credentials.save(GitHubOAuthToken(accessToken: "token-a"), clientID: "client-a")
+
+        let appState = AppState(githubOAuthSettingsStore: settings, githubCredentialStore: credentials)
+
+        XCTAssertTrue(appState.hasGitHubOAuthToken)
+        appState.githubOAuthClientID = "client-b"
+        XCTAssertFalse(appState.hasGitHubOAuthToken)
+        appState.githubOAuthClientID = "client-a"
+        XCTAssertTrue(appState.hasGitHubOAuthToken)
+    }
+
     private func scratchDefaults() -> (UserDefaults, String) {
         let suite = "AppStateSecurityTests-\(UUID().uuidString)"
         return (UserDefaults(suiteName: suite)!, suite)
@@ -304,5 +321,21 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         }
 
         return rootURL
+    }
+}
+
+private final class InMemoryGitHubCredentialStore: GitHubCredentialStoring {
+    private var tokens: [String: GitHubOAuthToken] = [:]
+
+    func load(clientID: String) throws -> GitHubOAuthToken? {
+        tokens[clientID.trimmingCharacters(in: .whitespacesAndNewlines)]
+    }
+
+    func save(_ token: GitHubOAuthToken, clientID: String) throws {
+        tokens[clientID.trimmingCharacters(in: .whitespacesAndNewlines)] = token
+    }
+
+    func delete(clientID: String) {
+        tokens.removeValue(forKey: clientID.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
