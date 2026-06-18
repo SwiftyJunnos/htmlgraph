@@ -267,7 +267,9 @@ final class AppState: ObservableObject {
     private let recentsStore: RecentVaultsStore
     private let securityStore: VaultSecurityStore
     private let githubCredentialStore: any GitHubCredentialStoring
+    private let githubRepositoryLoader: @Sendable (String) async throws -> [GitHubRepository]
     private var githubRepositoryTask: Task<Void, Never>?
+    private var githubRepositoryGeneration = UUID()
     /// True while restoring a vault's saved security posture, so the property
     /// `didSet`s don't immediately persist the value we just loaded back.
     private var isApplyingVaultSecurity = false
@@ -307,11 +309,15 @@ final class AppState: ObservableObject {
         recentsStore: RecentVaultsStore = RecentVaultsStore(),
         securityStore: VaultSecurityStore = VaultSecurityStore(),
         githubCredentialStore: any GitHubCredentialStoring = GitHubCredentialStore(),
-        githubOAuthClientID: String = AppState.bundledGitHubOAuthClientID()
+        githubOAuthClientID: String = AppState.bundledGitHubOAuthClientID(),
+        githubRepositoryLoader: @escaping @Sendable (String) async throws -> [GitHubRepository] = { token in
+            try await GitHubPagesDeployer().repositories(token: token)
+        }
     ) {
         self.recentsStore = recentsStore
         self.securityStore = securityStore
         self.githubCredentialStore = githubCredentialStore
+        self.githubRepositoryLoader = githubRepositoryLoader
         self.githubOAuthClientID = githubOAuthClientID.trimmingCharacters(in: .whitespacesAndNewlines)
         self.hasGitHubOAuthToken = (try? githubCredentialStore.load(clientID: self.githubOAuthClientID)) != nil
         self.recentVaults = recentsStore.load()
@@ -788,6 +794,7 @@ final class AppState: ObservableObject {
     func disconnectGitHub() {
         let clientID = githubOAuthClientID.trimmingCharacters(in: .whitespacesAndNewlines)
         cancelGitHubDeviceFlow()
+        githubRepositoryGeneration = UUID()
         githubRepositoryTask?.cancel()
         githubRepositoryTask = nil
         githubCredentialStore.delete(clientID: clientID)
@@ -799,17 +806,24 @@ final class AppState: ObservableObject {
     func refreshGitHubRepositories() {
         guard hasGitHubOAuthToken else { return }
         githubRepositoryTask?.cancel()
+        githubRepositoryGeneration = UUID()
+        let generation = githubRepositoryGeneration
         isLoadingGitHubRepositories = true
 
-        githubRepositoryTask = Task { [weak self] in
+        githubRepositoryTask = Task { [weak self, generation] in
             do {
                 guard let self else { return }
                 let token = try await self.githubAccessToken()
-                self.githubRepositories = try await GitHubPagesDeployer().repositories(token: token)
+                let repositories = try await self.githubRepositoryLoader(token)
+                guard self.githubRepositoryGeneration == generation else { return }
+                self.githubRepositories = repositories
             } catch is CancellationError {
             } catch {
-                self?.errorMessage = error.localizedDescription
+                if self?.githubRepositoryGeneration == generation {
+                    self?.errorMessage = error.localizedDescription
+                }
             }
+            guard self?.githubRepositoryGeneration == generation else { return }
             self?.isLoadingGitHubRepositories = false
             self?.githubRepositoryTask = nil
         }
