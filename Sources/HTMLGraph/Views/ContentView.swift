@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showsSecurityPopover = false
+    @State private var showsGitHubPagesDeploySheet = false
     @AppStorage("showsContextPanel") private var showsContextPanel = true
 
     var body: some View {
@@ -62,6 +63,8 @@ struct ContentView: View {
                         Button("New Folder…") { SidebarActions.newFolder(inParent: nil, appState: appState) }
                         Divider()
                         Button("Export Web Site…") { exportWebSite() }
+                        Button("Deploy to GitHub Pages…") { showsGitHubPagesDeploySheet = true }
+                            .disabled(appState.isDeployingStaticSite)
                         Button("Reveal Vault in Finder") {
                             if let path = appState.vaultURL?.path { SidebarCommands.reveal(absolutePath: path) }
                         }
@@ -124,6 +127,30 @@ struct ContentView: View {
             }
         } message: {
             Text("Upload this folder to a static host such as GitHub Pages, Netlify, or S3.")
+        }
+        .alert("GitHub Pages Deployed", isPresented: Binding(
+            get: { appState.deployedSiteURL != nil },
+            set: { isPresented in
+                if !isPresented {
+                    appState.deployedSiteURL = nil
+                }
+            }
+        )) {
+            Button("Copy URL") {
+                if let url = appState.deployedSiteURL {
+                    SidebarCommands.copyToPasteboard(url.absoluteString)
+                }
+                appState.deployedSiteURL = nil
+            }
+            Button("OK", role: .cancel) {
+                appState.deployedSiteURL = nil
+            }
+        } message: {
+            Text(appState.deployedSiteURL?.absoluteString ?? "")
+        }
+        .sheet(isPresented: $showsGitHubPagesDeploySheet) {
+            GitHubPagesDeploySheet()
+                .environmentObject(appState)
         }
     }
 
@@ -193,5 +220,78 @@ private struct SecuritySettingsView: View {
         }
         .padding(16)
         .frame(width: 320)
+    }
+}
+
+private struct GitHubPagesDeploySheet: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var owner = ""
+    @State private var repo = ""
+    @State private var branch = "gh-pages"
+    @State private var token = ""
+
+    private var canDeploy: Bool {
+        !owner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !repo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !branch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !appState.isDeployingStaticSite
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Deploy to GitHub Pages")
+                .font(.headline)
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                GridRow {
+                    Text("Owner")
+                    TextField("octocat", text: $owner)
+                }
+                GridRow {
+                    Text("Repository")
+                    TextField("my-vault", text: $repo)
+                }
+                GridRow {
+                    Text("Branch")
+                    TextField("gh-pages", text: $branch)
+                }
+                GridRow {
+                    Text("Token")
+                    SecureField("GitHub token", text: $token)
+                }
+            }
+            .textFieldStyle(.roundedBorder)
+            .disabled(appState.isDeployingStaticSite)
+
+            if appState.isDeployingStaticSite {
+                ProgressView("Deploying…")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .disabled(appState.isDeployingStaticSite)
+                Button("Deploy") {
+                    appState.deployStaticSiteToGitHubPages(
+                        config: GitHubPagesDeploymentConfig(
+                            owner: owner,
+                            repo: repo,
+                            branch: branch,
+                            token: token
+                        )
+                    )
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canDeploy)
+            }
+        }
+        .padding(18)
+        .frame(width: 420)
+        .onChange(of: appState.deployedSiteURL) { _, url in
+            if url != nil { dismiss() }
+        }
     }
 }

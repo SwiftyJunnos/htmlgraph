@@ -54,6 +54,7 @@ public struct VaultStaticSiteExporter {
             atomically: true,
             encoding: .utf8
         )
+        try Data().write(to: destinationURL.appendingPathComponent(".nojekyll"), options: [.atomic])
 
         return destinationURL
     }

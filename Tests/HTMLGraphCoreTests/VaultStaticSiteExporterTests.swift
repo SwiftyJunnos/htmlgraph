@@ -29,6 +29,7 @@ final class VaultStaticSiteExporterTests: XCTestCase {
         try VaultStaticSiteExporter().export(index: index, vaultURL: vaultURL, to: outputURL)
 
         XCTAssertTrue(exists(outputURL.appendingPathComponent("index.html")))
+        XCTAssertTrue(exists(outputURL.appendingPathComponent(".nojekyll")))
         XCTAssertTrue(exists(outputURL.appendingPathComponent("vault/index.html")))
         XCTAssertTrue(exists(outputURL.appendingPathComponent("vault/notes/My Page & 100%.html")))
         XCTAssertTrue(exists(outputURL.appendingPathComponent("vault/assets/pic.txt")))

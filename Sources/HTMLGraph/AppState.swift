@@ -212,6 +212,8 @@ final class AppState: ObservableObject {
     }
     @Published var errorMessage: String?
     @Published var exportedSiteURL: URL?
+    @Published var deployedSiteURL: URL?
+    @Published var isDeployingStaticSite = false
     /// Set when the current document was prevented from loading remote content
     /// because the vault has network access turned off. Drives the in-reader
     /// "Allow Network Access" banner; cleared on selection change and when granted.
@@ -693,6 +695,38 @@ final class AppState: ObservableObject {
             exportedSiteURL = try VaultStaticSiteExporter().export(index: index, vaultURL: vaultURL, to: destinationURL)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func deployStaticSiteToGitHubPages(config: GitHubPagesDeploymentConfig) {
+        guard !isDeployingStaticSite else { return }
+        guard let vaultURL else { return }
+        guard let index else {
+            errorMessage = "Wait for indexing to finish before deploying."
+            return
+        }
+
+        exportedSiteURL = nil
+        deployedSiteURL = nil
+        isDeployingStaticSite = true
+
+        Task { [weak self, vaultURL, index, config] in
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    let tempURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("HTMLGraphDeploy-\(UUID().uuidString)", isDirectory: true)
+                    defer { try? FileManager.default.removeItem(at: tempURL) }
+                    try FileManager.default.createDirectory(at: tempURL, withIntermediateDirectories: true)
+                    let siteURL = try VaultStaticSiteExporter().export(index: index, vaultURL: vaultURL, to: tempURL)
+                    return try await GitHubPagesDeployer().deploy(siteDirectory: siteURL, config: config)
+                }.value
+
+                guard let self else { return }
+                self.deployedSiteURL = result.pageURL
+            } catch {
+                self?.errorMessage = error.localizedDescription
+            }
+            self?.isDeployingStaticSite = false
         }
     }
 
