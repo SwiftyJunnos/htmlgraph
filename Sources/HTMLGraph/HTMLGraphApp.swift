@@ -1,4 +1,5 @@
 import AppKit
+import Sparkle
 import SwiftUI
 
 @main
@@ -7,6 +8,11 @@ struct HTMLGraphApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow
     @AppStorage("autoReopenLastVault") private var autoReopenLastVault = true
+    private let updaterController = SPUStandardUpdaterController(
+        startingUpdater: true,
+        updaterDelegate: nil,
+        userDriverDelegate: nil
+    )
 
     var body: some Scene {
         WindowGroup {
@@ -26,6 +32,12 @@ struct HTMLGraphApp: App {
         }
         .windowToolbarStyle(.unified)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates...") {
+                    updaterController.checkForUpdates(nil)
+                }
+            }
+
             CommandGroup(replacing: .newItem) {
                 Button("Open Vault...") {
                     guard EditorGuard.confirmLeavingEditor(appState) else { return }

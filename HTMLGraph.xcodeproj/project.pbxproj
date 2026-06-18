@@ -25,6 +25,7 @@
 		01000000000000000000010B /* InboxItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000B /* InboxItem.swift */; };
 		01000000000000000000010C /* InboxScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000C /* InboxScanner.swift */; };
 		010000000000000000000109 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = 010000000000000000000601 /* SwiftSoup */; };
+		010000000000000000000212 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 010000000000000000000602 /* Sparkle */; };
 		010000000000000000000201 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000011 /* AppState.swift */; };
 		010000000000000000000202 /* HTMLGraphApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000012 /* HTMLGraphApp.swift */; };
 		010000000000000000000203 /* VaultFolderPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000013 /* VaultFolderPicker.swift */; };
@@ -125,6 +126,7 @@
 		010000000000000000000031 /* HTMLGraph.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HTMLGraph.entitlements; sourceTree = "<group>"; };
 		010000000000000000000032 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		010000000000000000000033 /* AppIcon.svg */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = AppIcon.svg; sourceTree = "<group>"; };
+		010000000000000000000034 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		010000000000000000000041 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 		010000000000000000000042 /* Signing.example.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.example.xcconfig; sourceTree = "<group>"; };
 		010000000000000000000501 /* HTMLGraph.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HTMLGraph.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -138,6 +140,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				010000000000000000000301 /* HTMLGraphCore.framework in Frameworks */,
+				010000000000000000000212 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -239,6 +242,7 @@
 			isa = PBXGroup;
 			children = (
 				010000000000000000000031 /* HTMLGraph.entitlements */,
+				010000000000000000000034 /* Info.plist */,
 				010000000000000000000032 /* Assets.xcassets */,
 				010000000000000000000033 /* AppIcon.svg */,
 			);
@@ -298,6 +302,9 @@
 				010000000000000000000702 /* PBXTargetDependency */,
 			);
 			name = HTMLGraph;
+			packageProductDependencies = (
+				010000000000000000000602 /* Sparkle */,
+			);
 			productName = HTMLGraph;
 			productReference = 010000000000000000000501 /* HTMLGraph.app */;
 			productType = "com.apple.product-type.application";
@@ -349,6 +356,7 @@
 			);
 			mainGroup = 010000000000000000000801;
 			packageReferences = (
+				010000000000000000000603 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				010000000000000000000600 /* XCRemoteSwiftPackageReference "SwiftSoup" */,
 			);
 			productRefGroup = 010000000000000000000805 /* Products */;
@@ -475,10 +483,8 @@
 				DEVELOPMENT_TEAM = XW996HTK32;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = HTMLGraph;
-				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -505,10 +511,8 @@
 				DEVELOPMENT_TEAM = XW996HTK32;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = NO;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = HTMLGraph;
-				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -595,6 +599,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		010000000000000000000603 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.9.3;
+			};
+		};
 		010000000000000000000600 /* XCRemoteSwiftPackageReference "SwiftSoup" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/scinfu/SwiftSoup.git";
@@ -606,6 +618,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		010000000000000000000602 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 010000000000000000000603 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
 		010000000000000000000601 /* SwiftSoup */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 010000000000000000000600 /* XCRemoteSwiftPackageReference "SwiftSoup" */;
