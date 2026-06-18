@@ -24,6 +24,19 @@ public struct GitHubPagesDeploymentResult: Equatable, Sendable {
     }
 }
 
+public struct GitHubRepository: Identifiable, Equatable, Sendable {
+    public var id: String { fullName }
+    public let owner: String
+    public let name: String
+    public let fullName: String
+
+    public init(owner: String, name: String, fullName: String) {
+        self.owner = owner
+        self.name = name
+        self.fullName = fullName
+    }
+}
+
 public enum GitHubPagesDeploymentError: LocalizedError, Equatable {
     case missingField(String)
     case invalidField(String)
@@ -62,6 +75,25 @@ public struct GitHubPagesDeployer {
 
     public init(session: URLSession = .shared) {
         self.session = session
+    }
+
+    public func repositories(token: String) async throws -> [GitHubRepository] {
+        var repositories: [GitHubRepository] = []
+        var page = 1
+
+        while true {
+            let response: [RepositoryResponse] = try await decoded(
+                "GET",
+                "/user/repos?affiliation=owner,collaborator,organization_member&per_page=100&sort=updated&page=\(page)",
+                token: token,
+                allowed: [200]
+            )
+            repositories.append(contentsOf: response.compactMap(\.deployableRepository))
+            guard response.count == 100 else { break }
+            page += 1
+        }
+
+        return repositories
     }
 
     public func deploy(siteDirectory: URL, config: GitHubPagesDeploymentConfig) async throws -> GitHubPagesDeploymentResult {
@@ -362,4 +394,34 @@ private struct PagesResponse: Decodable {
 
 private struct APIErrorResponse: Decodable {
     let message: String
+}
+
+private struct RepositoryResponse: Decodable {
+    struct Owner: Decodable {
+        let login: String
+    }
+
+    struct Permissions: Decodable {
+        let admin: Bool?
+        let push: Bool?
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case fullName = "full_name"
+        case owner
+        case permissions
+    }
+
+    let name: String
+    let fullName: String
+    let owner: Owner
+    let permissions: Permissions?
+
+    var deployableRepository: GitHubRepository? {
+        if let permissions, permissions.admin != true, permissions.push != true {
+            return nil
+        }
+        return GitHubRepository(owner: owner.login, name: name, fullName: fullName)
+    }
 }

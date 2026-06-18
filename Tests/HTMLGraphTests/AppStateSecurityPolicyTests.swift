@@ -96,21 +96,15 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertTrue(appState.allowsNetworkAccess)
     }
 
-    func testGitHubOAuthConnectionStateFollowsClientID() throws {
-        let (defaults, suite) = scratchDefaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let settings = GitHubOAuthSettingsStore(defaults: defaults)
+    func testGitHubOAuthConnectionStateUsesBundledClientID() throws {
         let credentials = InMemoryGitHubCredentialStore()
-        settings.save(clientID: "client-a")
         try credentials.save(GitHubOAuthToken(accessToken: "token-a"), clientID: "client-a")
 
-        let appState = AppState(githubOAuthSettingsStore: settings, githubCredentialStore: credentials)
+        let appState = AppState(githubCredentialStore: credentials, githubOAuthClientID: " client-a ")
 
+        XCTAssertEqual(appState.githubOAuthClientID, "client-a")
         XCTAssertTrue(appState.hasGitHubOAuthToken)
-        appState.githubOAuthClientID = "client-b"
-        XCTAssertFalse(appState.hasGitHubOAuthToken)
-        appState.githubOAuthClientID = "client-a"
-        XCTAssertTrue(appState.hasGitHubOAuthToken)
+        XCTAssertTrue(appState.isGitHubOAuthConfigured)
     }
 
     private func scratchDefaults() -> (UserDefaults, String) {
