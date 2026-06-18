@@ -238,7 +238,7 @@ final class AppState: ObservableObject {
                 cancelGitHubDeviceFlow()
             }
             githubOAuthSettingsStore.save(clientID: clientID)
-            hasGitHubOAuthToken = githubCredentialStore.load(clientID: clientID) != nil
+            hasGitHubOAuthToken = (try? githubCredentialStore.load(clientID: clientID)) != nil
         }
     }
     @Published private(set) var githubDeviceCode: GitHubOAuthDeviceCode?
@@ -338,7 +338,7 @@ final class AppState: ObservableObject {
         self.githubOAuthSettingsStore = githubOAuthSettingsStore
         self.githubCredentialStore = githubCredentialStore
         self.githubOAuthClientID = githubOAuthSettingsStore.clientID()
-        self.hasGitHubOAuthToken = githubCredentialStore.load(clientID: self.githubOAuthClientID) != nil
+        self.hasGitHubOAuthToken = (try? githubCredentialStore.load(clientID: self.githubOAuthClientID)) != nil
         self.recentVaults = recentsStore.load()
     }
 
@@ -756,9 +756,11 @@ final class AppState: ObservableObject {
             do {
                 let client = GitHubDeviceFlowClient()
                 let code = try await client.requestDeviceCode(clientID: clientID)
+                try Task.checkCancellation()
                 try self?.checkCurrentGitHubConnection(clientID: clientID, generation: generation)
                 self?.githubDeviceCode = code
                 let token = try await client.waitForAccessToken(clientID: clientID, deviceCode: code)
+                try Task.checkCancellation()
                 try self?.checkCurrentGitHubConnection(clientID: clientID, generation: generation)
                 try self?.githubCredentialStore.save(token, clientID: clientID)
                 self?.hasGitHubOAuthToken = true
@@ -817,7 +819,7 @@ final class AppState: ObservableObject {
         let branch = branch.trimmingCharacters(in: .whitespacesAndNewlines)
 
         deployStaticSiteToGitHubPages { [weak self] in
-            guard let self else { throw GitHubDeviceFlowError.invalidResponse }
+            guard let self else { throw CancellationError() }
             let token = try await self.githubAccessToken()
             return GitHubPagesDeploymentConfig(owner: owner, repo: repo, branch: branch, token: token)
         }
@@ -859,7 +861,7 @@ final class AppState: ObservableObject {
     private func githubAccessToken() async throws -> String {
         let clientID = githubOAuthClientID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clientID.isEmpty else { throw GitHubDeviceFlowError.missingClientID }
-        guard var token = githubCredentialStore.load(clientID: clientID) else { throw GitHubDeviceFlowError.accessDenied }
+        guard var token = try githubCredentialStore.load(clientID: clientID) else { throw GitHubDeviceFlowError.accessDenied }
 
         if let expiresAt = token.expiresAt,
            expiresAt <= Date().addingTimeInterval(60) {
@@ -1029,6 +1031,7 @@ final class AppState: ObservableObject {
     deinit {
         indexingTask?.cancel()
         inboxPollingTask?.cancel()
+        githubConnectionTask?.cancel()
         searchTask?.cancel()
         httpServer.stop()
         accessedVaultURL?.stopAccessingSecurityScopedResource()

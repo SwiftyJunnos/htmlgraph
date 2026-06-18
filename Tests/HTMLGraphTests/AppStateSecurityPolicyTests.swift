@@ -327,7 +327,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
 private final class InMemoryGitHubCredentialStore: GitHubCredentialStoring {
     private var tokens: [String: GitHubOAuthToken] = [:]
 
-    func load(clientID: String) -> GitHubOAuthToken? {
+    func load(clientID: String) throws -> GitHubOAuthToken? {
         tokens[clientID.trimmingCharacters(in: .whitespacesAndNewlines)]
     }
 
