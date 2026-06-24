@@ -35,6 +35,14 @@ struct HTMLGraphApp: App {
                 }
                 .keyboardShortcut("o", modifiers: .command)
 
+                Button("Connect to Remote…") {
+                    Task {
+                        guard await EditorGuard.confirmLeavingEditor(appState) else { return }
+                        appState.isShowingRemoteConnect = true
+                    }
+                }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+
                 Button("Global Graph") {
                     openWindow(id: "global-graph")
                 }
@@ -76,7 +84,7 @@ struct HTMLGraphApp: App {
                     guard alert.runModal() == .alertFirstButtonReturn else { return }
                     appState.regenerateAgentGuide()
                 }
-                .disabled(appState.vaultURL == nil)
+                .disabled(!appState.hasOpenVault)
             }
         }
 

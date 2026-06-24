@@ -37,8 +37,12 @@ struct ContentView: View {
         }
         .navigationTitle(appState.vaultDisplayName ?? "HTMLGraph")
         .navigationSubtitle(appState.vaultStatusText)
+        .sheet(isPresented: $appState.isShowingRemoteConnect) {
+            RemoteConnectView()
+                .environmentObject(appState)
+        }
         .toolbar {
-            if appState.vaultURL != nil {
+            if appState.hasOpenVault {
                 ToolbarItem(placement: .automatic) {
                     Button {
                         showsSecurityPopover = true

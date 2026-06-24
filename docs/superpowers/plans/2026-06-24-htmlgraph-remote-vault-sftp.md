@@ -215,10 +215,23 @@ Operations the protocol must cover, by call site:
     internal and the test setups set it. (Process miss: the `swift test | tail` gate only showed the
     *last* bundle's summary, hiding the app bundle's failures; now BOTH bundles are checked.)
     Verified: 216 tests (135 core + 81 app) + xcodebuild green.
-  - **M8c part 2 — connect UI + creds (NEXT).** A "Connect to Remote…" dialog (host/user/pw/path)
-    wired to a menu, calling `openRemoteVault`. Password in Keychain + persist remote vaults in
-    recents (generalize `RecentVault`). Host-key TOFU (replace `acceptAnything()`). Hide local-only
-    UI (Reveal in Finder / external editor) for remote vaults via `isRemoteVault`.
+  - ✅ **M8c part 2 — connect UI reachable (DONE 2026-06-24).** `RemoteConnectView` (SwiftUI sheet:
+    host/port/user/password/path) presented via `AppState.isShowingRemoteConnect`; a "Connect to
+    Remote…" menu item (⇧⌘O, EditorGuard-gated) sets the flag → `openRemoteVault`. Added
+    `hasOpenVault` (== `vaultFileSystem != nil`) and switched the toolbar (ContentView), sidebar
+    (VaultSidebar), and Regenerate-Agent-Guide gate (HTMLGraphApp) from `vaultURL != nil` to it, so
+    the chrome shows for remote vaults too. `RemoteConnectView.swift` registered in pbxproj.
+    Verified: 216 tests + xcodebuild green. So a remote vault now opens from the UI and its sidebar
+    list + search work.
+  - **M8d — remote document PREVIEW (NEXT).** ReaderPane's web views (`HTMLDocumentWebView`,
+    `VisualHTMLEditor`) are gated on `vaultURL` and build from `document.absolutePath` (a file URL),
+    so remote docs don't render. Refactor the preview to load `vaultBaseURL` + the document's
+    relative id (`document.id`) directly (the loopback server already serves remote files via M7/M8a)
+    instead of mapping a local file URL; gate on `vaultBaseURL`/`hasOpenVault`. Also hide local-only
+    actions (Reveal in Finder / Open in Browser / external editor) for remote via `isRemoteVault`.
+  - **M10** — Keychain for the password + remote recents (generalize `RecentVault`); host-key TOFU
+    (replace `acceptAnything()`); key-based auth; `posix-rename@openssh.com` atomic writes;
+    connection lifecycle; cache relocation.
 
 - **M9 — `SFTPFileSystem` implementation. IN PROGRESS.**
   - ✅ **Citadel added** (`Package.swift` → `orlandos-nl/Citadel` from 0.7.0; resolved to

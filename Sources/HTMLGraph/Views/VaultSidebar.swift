@@ -46,7 +46,7 @@ struct VaultSidebar: View {
         // Vault-wide actions for right-clicking empty sidebar space. Row context menus
         // take precedence over this for their own rows.
         .contextMenu {
-            if appState.vaultURL != nil {
+            if appState.hasOpenVault {
                 Button("New Document…") { SidebarActions.newDocument(inFolder: nil, appState: appState) }
                 Button("New Folder…") { SidebarActions.newFolder(inParent: nil, appState: appState) }
                 Divider()

@@ -184,6 +184,8 @@ final class AppState: ObservableObject {
     private nonisolated static let embeddingLogger = Logger(subsystem: "com.junnos.htmlgraph", category: "SemanticIndex")
 
     @Published var vaultURL: URL?
+    /// Drives the "Connect to Remote…" sheet (host/user/password/path entry → `openRemoteVault`).
+    @Published var isShowingRemoteConnect = false
     /// Loopback origin (`http://127.0.0.1:<port>/<token>/`) the current vault is served
     /// from. Documents render from this so third-party web embeds get a real web origin.
     @Published var vaultBaseURL: URL?
@@ -508,6 +510,10 @@ final class AppState: ObservableObject {
     /// True when the open vault is remote (SFTP) rather than a local folder. Drives UI that
     /// hides local-only actions (Reveal in Finder, external editor) for remote vaults.
     var isRemoteVault: Bool { vaultFileSystem != nil && vaultURL == nil }
+
+    /// True when any vault (local or remote) is open. UI chrome should gate on this rather
+    /// than `vaultURL`, which is nil for a remote vault.
+    var hasOpenVault: Bool { vaultFileSystem != nil }
 
     func removeRecent(_ recent: RecentVault) {
         recentVaults.removeAll { $0.path == recent.path }
