@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showsSecurityPopover = false
+    @State private var showsGitHubPagesDeploySheet = false
     @AppStorage("showsContextPanel") private var showsContextPanel = true
 
     var body: some View {
@@ -65,6 +66,9 @@ struct ContentView: View {
                         Button("New Document…") { SidebarActions.newDocument(inFolder: nil, appState: appState) }
                         Button("New Folder…") { SidebarActions.newFolder(inParent: nil, appState: appState) }
                         Divider()
+                        Button("Export Web Site…") { exportWebSite() }
+                        Button("Deploy to GitHub Pages…") { showsGitHubPagesDeploySheet = true }
+                            .disabled(appState.isDeployingStaticSite)
                         Button("Reveal Vault in Finder") {
                             if let path = appState.vaultURL?.path { SidebarCommands.reveal(absolutePath: path) }
                         }
@@ -108,12 +112,68 @@ struct ContentView: View {
         } message: {
             Text(appState.errorMessage ?? "")
         }
+        .alert("Web Site Exported", isPresented: Binding(
+            get: { appState.exportedSiteURL != nil },
+            set: { isPresented in
+                if !isPresented {
+                    appState.exportedSiteURL = nil
+                }
+            }
+        )) {
+            Button("Reveal") {
+                if let path = appState.exportedSiteURL?.path {
+                    SidebarCommands.reveal(absolutePath: path)
+                }
+                appState.exportedSiteURL = nil
+            }
+            Button("OK", role: .cancel) {
+                appState.exportedSiteURL = nil
+            }
+        } message: {
+            Text("Upload this folder to a static host such as GitHub Pages, Netlify, or S3.")
+        }
+        .alert("GitHub Pages Deployed", isPresented: Binding(
+            get: { appState.deployedSiteURL != nil },
+            set: { isPresented in
+                if !isPresented {
+                    appState.deployedSiteURL = nil
+                }
+            }
+        )) {
+            Button("Copy URL") {
+                if let url = appState.deployedSiteURL {
+                    SidebarCommands.copyToPasteboard(url.absoluteString)
+                }
+                appState.deployedSiteURL = nil
+            }
+            Button("OK", role: .cancel) {
+                appState.deployedSiteURL = nil
+            }
+        } message: {
+            Text(appState.deployedSiteURL?.absoluteString ?? "")
+        }
+        .sheet(isPresented: $showsGitHubPagesDeploySheet) {
+            GitHubPagesDeploySheet()
+                .environmentObject(appState)
+        }
     }
 
     private func chooseVault() {
         Task {
             guard await EditorGuard.confirmLeavingEditor(appState) else { return }
             appState.chooseAndOpenVault()
+        }
+    }
+
+    private func exportWebSite() {
+        Task {
+            // `confirmLeavingEditor` is async (it may save over the network), so confirm first,
+            // then run the local export-folder picker and kick off the export.
+            guard await EditorGuard.confirmLeavingEditor(appState),
+                  let destinationURL = VaultFolderPicker.chooseStaticSiteExportFolder() else {
+                return
+            }
+            appState.exportStaticSite(to: destinationURL)
         }
     }
 
@@ -171,5 +231,184 @@ private struct SecuritySettingsView: View {
         }
         .padding(16)
         .frame(width: 320)
+    }
+}
+
+private struct GitHubPagesDeploySheet: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @State private var selectedRepository = ""
+    @State private var owner = ""
+    @State private var repo = ""
+    @State private var branch = "gh-pages"
+    @State private var token = ""
+
+    private var canConnectGitHub: Bool {
+        appState.isGitHubOAuthConfigured && !appState.isConnectingGitHub
+    }
+
+    private var hasDeploymentAuth: Bool {
+        appState.hasGitHubOAuthToken || !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var selectedGitHubRepository: GitHubRepository? {
+        appState.githubRepositories.first { $0.fullName == selectedRepository }
+    }
+
+    private var usesTokenFallback: Bool {
+        !appState.isGitHubOAuthConfigured
+    }
+
+    private var canDeploy: Bool {
+        let hasRepository = usesTokenFallback
+            ? !owner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !repo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            : selectedGitHubRepository != nil
+
+        return hasRepository &&
+            !branch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            hasDeploymentAuth &&
+            !appState.isDeployingStaticSite
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Deploy to GitHub Pages")
+                .font(.headline)
+
+            HStack(spacing: 10) {
+                if appState.hasGitHubOAuthToken {
+                    Label("GitHub connected", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Button("Disconnect") { appState.disconnectGitHub() }
+                } else if appState.isConnectingGitHub {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Waiting for GitHub")
+                        .foregroundStyle(.secondary)
+                    Button("Cancel") { appState.cancelGitHubDeviceFlow() }
+                } else if appState.isGitHubOAuthConfigured {
+                    Button("Sign in to GitHub") {
+                        appState.startGitHubDeviceFlow()
+                    }
+                    .disabled(!canConnectGitHub)
+                } else {
+                    Text("GitHub sign-in is not available in this build. Use a token below.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let code = appState.githubDeviceCode {
+                HStack(spacing: 12) {
+                    Text(code.userCode)
+                        .font(.system(.title3, design: .monospaced).weight(.semibold))
+                    Button("Open GitHub") { openURL(code.verificationURI) }
+                }
+            }
+
+            Divider()
+
+            if appState.hasGitHubOAuthToken {
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                    GridRow {
+                        Text("Repository")
+                        if appState.isLoadingGitHubRepositories {
+                            ProgressView("Loading repositories…")
+                        } else if appState.githubRepositories.isEmpty {
+                            Text("No writable repositories found.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Picker("Repository", selection: $selectedRepository) {
+                                Text("Choose repository").tag("")
+                                ForEach(appState.githubRepositories) { repository in
+                                    Text(repository.fullName).tag(repository.fullName)
+                                }
+                            }
+                            .labelsHidden()
+                        }
+                    }
+                    GridRow {
+                        Text("Branch")
+                        TextField("gh-pages", text: $branch)
+                    }
+                }
+                .textFieldStyle(.roundedBorder)
+                .disabled(appState.isDeployingStaticSite)
+            } else if !appState.isGitHubOAuthConfigured {
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                    GridRow {
+                        Text("Owner")
+                        TextField("octocat", text: $owner)
+                    }
+                    GridRow {
+                        Text("Repository")
+                        TextField("my-vault", text: $repo)
+                    }
+                    GridRow {
+                        Text("Branch")
+                        TextField("gh-pages", text: $branch)
+                    }
+                    GridRow {
+                        Text("Token")
+                        SecureField("Personal access token", text: $token)
+                    }
+                }
+                .textFieldStyle(.roundedBorder)
+                .disabled(appState.isDeployingStaticSite)
+            }
+
+            if appState.isDeployingStaticSite {
+                ProgressView("Deploying…")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .disabled(appState.isDeployingStaticSite)
+                Button("Deploy") {
+                    if let repository = selectedGitHubRepository {
+                        appState.deployStaticSiteToGitHubPages(owner: repository.owner, repo: repository.name, branch: branch)
+                    } else {
+                        appState.deployStaticSiteToGitHubPages(
+                            config: GitHubPagesDeploymentConfig(
+                                owner: owner,
+                                repo: repo,
+                                branch: branch,
+                                token: token
+                            )
+                        )
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canDeploy)
+            }
+        }
+        .padding(18)
+        .frame(width: 520)
+        .onAppear {
+            if appState.hasGitHubOAuthToken, appState.githubRepositories.isEmpty {
+                appState.refreshGitHubRepositories()
+            }
+        }
+        .onChange(of: appState.githubDeviceCode) { _, code in
+            if let code { openURL(code.verificationURI) }
+        }
+        .onChange(of: appState.hasGitHubOAuthToken) { _, connected in
+            if !connected {
+                selectedRepository = ""
+            }
+        }
+        .onChange(of: appState.githubRepositories) { _, repositories in
+            if selectedRepository.isEmpty {
+                selectedRepository = repositories.first?.fullName ?? ""
+            }
+        }
+        .onDisappear {
+            appState.cancelGitHubDeviceFlow()
+        }
+        .onChange(of: appState.deployedSiteURL) { _, url in
+            if url != nil { dismiss() }
+        }
     }
 }

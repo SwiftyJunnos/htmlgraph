@@ -12,4 +12,18 @@ enum VaultFolderPicker {
         guard panel.runModal() == .OK else { return nil }
         return panel.url
     }
+
+    @MainActor
+    static func chooseStaticSiteExportFolder() -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Export"
+        panel.message = "Choose an empty folder, or an existing HTMLGraph web export folder."
+
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
+    }
 }

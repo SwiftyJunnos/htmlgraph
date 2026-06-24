@@ -11,6 +11,7 @@ let package = Package(
         .executable(name: "HTMLGraph", targets: ["HTMLGraph"])
     ],
     dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.3"),
         .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.8.8"),
         .package(url: "https://github.com/orlandos-nl/Citadel.git", from: "0.7.0")
     ],
@@ -24,7 +25,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "HTMLGraph",
-            dependencies: ["HTMLGraphCore"],
+            dependencies: [
+                "HTMLGraphCore",
+                .product(name: "Sparkle", package: "Sparkle")
+            ],
             resources: [
                 .process("Resources")
             ]

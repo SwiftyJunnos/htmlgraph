@@ -18,11 +18,15 @@
 		01000000000000000000010D /* VaultIndexJSON.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000009 /* VaultIndexJSON.swift */; };
 		01000000000000000000010E /* VaultIndexExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000D /* VaultIndexExporter.swift */; };
 		010000000000000000000110 /* VaultAgentGuideWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000E /* VaultAgentGuideWriter.swift */; };
+		010000000000000000000111 /* VaultStaticSiteExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000F /* VaultStaticSiteExporter.swift */; };
+		010000000000000000000112 /* GitHubPagesDeployer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000010 /* GitHubPagesDeployer.swift */; };
+		010000000000000000000113 /* GitHubDeviceFlowClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000023 /* GitHubDeviceFlowClient.swift */; };
 		01000000000000000000010A /* InboxAccepter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000A /* InboxAccepter.swift */; };
 		01000000000000000000010B /* InboxItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000B /* InboxItem.swift */; };
 		01000000000000000000010C /* InboxScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000000C /* InboxScanner.swift */; };
 		010000000000000000000109 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = 010000000000000000000601 /* SwiftSoup */; };
-		010000000000000000000160 /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 010000000000000000000603 /* Citadel */; };
+		010000000000000000000160 /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 010000000000000000000605 /* Citadel */; };
+		010000000000000000000214 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 010000000000000000000602 /* Sparkle */; };
 		010000000000000000000201 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000011 /* AppState.swift */; };
 		010000000000000000000202 /* HTMLGraphApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000012 /* HTMLGraphApp.swift */; };
 		010000000000000000000203 /* VaultFolderPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000013 /* VaultFolderPicker.swift */; };
@@ -40,7 +44,8 @@
 		01000000000000000000020F /* EditorSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000001F /* EditorSession.swift */; };
 		010000000000000000000210 /* DocumentSourceEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000020 /* DocumentSourceEditor.swift */; };
 		010000000000000000000211 /* VisualHTMLEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000022 /* VisualHTMLEditor.swift */; };
-		010000000000000000000212 /* RemoteConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000023 /* RemoteConnectView.swift */; };
+		010000000000000000000213 /* RemoteConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000025 /* RemoteConnectView.swift */; };
+		010000000000000000000212 /* GitHubCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000024 /* GitHubCredentialStore.swift */; };
 		01000000000000000000010F /* HTMLBodyReplacer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000021 /* HTMLBodyReplacer.swift */; };
 		010000000000000000000151 /* EmbeddingProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000051 /* EmbeddingProvider.swift */; };
 		010000000000000000000152 /* EmbeddingMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000052 /* EmbeddingMath.swift */; };
@@ -92,6 +97,8 @@
 		010000000000000000000009 /* VaultIndexJSON.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultIndexJSON.swift; sourceTree = "<group>"; };
 		01000000000000000000000D /* VaultIndexExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultIndexExporter.swift; sourceTree = "<group>"; };
 		01000000000000000000000E /* VaultAgentGuideWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAgentGuideWriter.swift; sourceTree = "<group>"; };
+		01000000000000000000000F /* VaultStaticSiteExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultStaticSiteExporter.swift; sourceTree = "<group>"; };
+		010000000000000000000010 /* GitHubPagesDeployer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubPagesDeployer.swift; sourceTree = "<group>"; };
 		01000000000000000000000A /* InboxAccepter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxAccepter.swift; sourceTree = "<group>"; };
 		01000000000000000000000B /* InboxItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxItem.swift; sourceTree = "<group>"; };
 		01000000000000000000000C /* InboxScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxScanner.swift; sourceTree = "<group>"; };
@@ -113,7 +120,9 @@
 		010000000000000000000020 /* DocumentSourceEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentSourceEditor.swift; sourceTree = "<group>"; };
 		010000000000000000000021 /* HTMLBodyReplacer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTMLBodyReplacer.swift; sourceTree = "<group>"; };
 		010000000000000000000022 /* VisualHTMLEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualHTMLEditor.swift; sourceTree = "<group>"; };
-		010000000000000000000023 /* RemoteConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteConnectView.swift; sourceTree = "<group>"; };
+		010000000000000000000025 /* RemoteConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteConnectView.swift; sourceTree = "<group>"; };
+		010000000000000000000023 /* GitHubDeviceFlowClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubDeviceFlowClient.swift; sourceTree = "<group>"; };
+		010000000000000000000024 /* GitHubCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubCredentialStore.swift; sourceTree = "<group>"; };
 		010000000000000000000051 /* EmbeddingProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingProvider.swift; sourceTree = "<group>"; };
 		010000000000000000000052 /* EmbeddingMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingMath.swift; sourceTree = "<group>"; };
 		010000000000000000000053 /* EmbeddingInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingInput.swift; sourceTree = "<group>"; };
@@ -126,6 +135,7 @@
 		010000000000000000000031 /* HTMLGraph.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HTMLGraph.entitlements; sourceTree = "<group>"; };
 		010000000000000000000032 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		010000000000000000000033 /* AppIcon.svg */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = AppIcon.svg; sourceTree = "<group>"; };
+		010000000000000000000034 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		010000000000000000000041 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 		010000000000000000000042 /* Signing.example.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.example.xcconfig; sourceTree = "<group>"; };
 		010000000000000000000501 /* HTMLGraph.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HTMLGraph.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -139,6 +149,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				010000000000000000000301 /* HTMLGraphCore.framework in Frameworks */,
+				010000000000000000000214 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -196,6 +207,9 @@
 				010000000000000000000057 /* VaultFileSystem.swift */,
 				010000000000000000000058 /* LocalFileSystem.swift */,
 				010000000000000000000059 /* SFTPFileSystem.swift */,
+				01000000000000000000000F /* VaultStaticSiteExporter.swift */,
+				010000000000000000000010 /* GitHubPagesDeployer.swift */,
+				010000000000000000000023 /* GitHubDeviceFlowClient.swift */,
 			);
 			path = HTMLGraphCore;
 			sourceTree = "<group>";
@@ -218,6 +232,7 @@
 			children = (
 				010000000000000000000011 /* AppState.swift */,
 				01000000000000000000001F /* EditorSession.swift */,
+				010000000000000000000024 /* GitHubCredentialStore.swift */,
 				010000000000000000000012 /* HTMLGraphApp.swift */,
 				01000000000000000000001D /* InboxDestinationPicker.swift */,
 				010000000000000000000013 /* VaultFolderPicker.swift */,
@@ -240,6 +255,7 @@
 			isa = PBXGroup;
 			children = (
 				010000000000000000000031 /* HTMLGraph.entitlements */,
+				010000000000000000000034 /* Info.plist */,
 				010000000000000000000032 /* Assets.xcassets */,
 				010000000000000000000033 /* AppIcon.svg */,
 			);
@@ -264,7 +280,7 @@
 				010000000000000000000016 /* GlobalGraphView.swift */,
 				010000000000000000000017 /* ReaderPane.swift */,
 				010000000000000000000018 /* VaultSidebar.swift */,
-				010000000000000000000023 /* RemoteConnectView.swift */,
+				010000000000000000000025 /* RemoteConnectView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -300,6 +316,9 @@
 				010000000000000000000702 /* PBXTargetDependency */,
 			);
 			name = HTMLGraph;
+			packageProductDependencies = (
+				010000000000000000000602 /* Sparkle */,
+			);
 			productName = HTMLGraph;
 			productReference = 010000000000000000000501 /* HTMLGraph.app */;
 			productType = "com.apple.product-type.application";
@@ -318,7 +337,7 @@
 			name = HTMLGraphCore;
 			packageProductDependencies = (
 				010000000000000000000601 /* SwiftSoup */,
-				010000000000000000000603 /* Citadel */,
+				010000000000000000000605 /* Citadel */,
 			);
 			productName = HTMLGraphCore;
 			productReference = 010000000000000000000502 /* HTMLGraphCore.framework */;
@@ -352,8 +371,9 @@
 			);
 			mainGroup = 010000000000000000000801;
 			packageReferences = (
+				010000000000000000000603 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				010000000000000000000600 /* XCRemoteSwiftPackageReference "SwiftSoup" */,
-				010000000000000000000602 /* XCRemoteSwiftPackageReference "Citadel" */,
+				010000000000000000000604 /* XCRemoteSwiftPackageReference "Citadel" */,
 			);
 			productRefGroup = 010000000000000000000805 /* Products */;
 			projectDirPath = "";
@@ -398,7 +418,8 @@
 				01000000000000000000020F /* EditorSession.swift in Sources */,
 				010000000000000000000210 /* DocumentSourceEditor.swift in Sources */,
 				010000000000000000000211 /* VisualHTMLEditor.swift in Sources */,
-				010000000000000000000212 /* RemoteConnectView.swift in Sources */,
+				010000000000000000000213 /* RemoteConnectView.swift in Sources */,
+				010000000000000000000212 /* GitHubCredentialStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -420,6 +441,9 @@
 				01000000000000000000010D /* VaultIndexJSON.swift in Sources */,
 				01000000000000000000010E /* VaultIndexExporter.swift in Sources */,
 				010000000000000000000110 /* VaultAgentGuideWriter.swift in Sources */,
+				010000000000000000000111 /* VaultStaticSiteExporter.swift in Sources */,
+				010000000000000000000112 /* GitHubPagesDeployer.swift in Sources */,
+				010000000000000000000113 /* GitHubDeviceFlowClient.swift in Sources */,
 				01000000000000000000010F /* HTMLBodyReplacer.swift in Sources */,
 				010000000000000000000151 /* EmbeddingProvider.swift in Sources */,
 				010000000000000000000152 /* EmbeddingMath.swift in Sources */,
@@ -479,10 +503,8 @@
 				DEVELOPMENT_TEAM = XW996HTK32;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = HTMLGraph;
-				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -509,10 +531,8 @@
 				DEVELOPMENT_TEAM = XW996HTK32;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = NO;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = HTMLGraph;
-				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -599,6 +619,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		010000000000000000000603 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.9.3;
+			};
+		};
 		010000000000000000000600 /* XCRemoteSwiftPackageReference "SwiftSoup" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/scinfu/SwiftSoup.git";
@@ -607,7 +635,7 @@
 				minimumVersion = 2.8.8;
 			};
 		};
-		010000000000000000000602 /* XCRemoteSwiftPackageReference "Citadel" */ = {
+		010000000000000000000604 /* XCRemoteSwiftPackageReference "Citadel" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/orlandos-nl/Citadel.git";
 			requirement = {
@@ -618,14 +646,19 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		010000000000000000000602 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 010000000000000000000603 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
 		010000000000000000000601 /* SwiftSoup */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 010000000000000000000600 /* XCRemoteSwiftPackageReference "SwiftSoup" */;
 			productName = SwiftSoup;
 		};
-		010000000000000000000603 /* Citadel */ = {
+		010000000000000000000605 /* Citadel */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 010000000000000000000602 /* XCRemoteSwiftPackageReference "Citadel" */;
+			package = 010000000000000000000604 /* XCRemoteSwiftPackageReference "Citadel" */;
 			productName = Citadel;
 		};
 /* End XCSwiftPackageProductDependency section */
