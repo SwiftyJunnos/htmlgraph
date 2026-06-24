@@ -175,7 +175,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         let item = try XCTUnwrap(appState.inboxItems.first)
 
         let destinationURL = vaultURL.appendingPathComponent("Notes/idea.html")
-        try appState.acceptInboxItem(item, to: destinationURL)
+        try await appState.acceptInboxItem(item, to: destinationURL)
 
         XCTAssertEqual(appState.inboxItems, [])
         XCTAssertNil(appState.selectedInboxItemId)
@@ -193,7 +193,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         try await appState.refreshInbox()
         let item = try XCTUnwrap(appState.inboxItems.first)
 
-        appState.addToVault(item, folder: nil)
+        await appState.addToVault(item, folder: nil)
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: vaultURL.appendingPathComponent("draft.html").path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: vaultURL.appendingPathComponent("Inbox/draft.html").path))
@@ -237,7 +237,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertTrue(tree[2].children.isEmpty)
     }
 
-    func testCreateDocumentForUnresolvedWritesStubHtml() throws {
+    func testCreateDocumentForUnresolvedWritesStubHtml() async throws {
         let vaultURL = try makeTemporaryVault(files: [
             "index.html": "<html><head><title>Home</title></head><body></body></html>"
         ])
@@ -256,7 +256,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
             status: .unresolved
         )
 
-        appState.createDocument(forUnresolved: edge)
+        await appState.createDocument(forUnresolved: edge)
 
         let created = vaultURL.appendingPathComponent("concepts/new-note.html")
         XCTAssertTrue(FileManager.default.fileExists(atPath: created.path))
@@ -266,7 +266,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertNil(appState.errorMessage)
     }
 
-    func testCreateDocumentIgnoresNonHtmlTarget() throws {
+    func testCreateDocumentIgnoresNonHtmlTarget() async throws {
         let vaultURL = try makeTemporaryVault(files: [
             "index.html": "<html><head><title>Home</title></head><body></body></html>"
         ])
@@ -285,7 +285,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
             status: .unresolved
         )
 
-        appState.createDocument(forUnresolved: edge)
+        await appState.createDocument(forUnresolved: edge)
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: vaultURL.appendingPathComponent("notes.txt").path))
     }

@@ -876,71 +876,64 @@ final class AppState: ObservableObject {
         }
     }
 
-    func acceptInboxItem(_ item: InboxItem, to destinationURL: URL) throws {
+    func acceptInboxItem(_ item: InboxItem, to destinationURL: URL) async throws {
         guard let vaultURL else { return }
-
-        try InboxAccepter().accept(item, to: destinationURL, vaultURL: vaultURL)
-        // The item was just moved out of Inbox; drop it from the in-memory list now (a full
-        // re-scan is async). openVault's reindex re-scans the inbox shortly after.
-        inboxItems.removeAll { $0.id == item.id }
-        sidebarSelection = nil
-        openVault(vaultURL)
+        let relativeDestination = try Self.vaultRelativePath(for: destinationURL, vaultURL: vaultURL)
+        try await fileInboxItem(item, toRelativePath: relativeDestination, vaultURL: vaultURL)
     }
 
     /// Promotes an unfiled item into the vault — to the root by default, or into a
     /// known folder. The folder is purely organizational: the graph is flat, so every
     /// destination yields the same node. Resolves name collisions so the one-click
     /// path never dead-ends.
-    func addToVault(_ item: InboxItem, folder: String?) {
+    func addToVault(_ item: InboxItem, folder: String?) async {
         guard let vaultURL else { return }
-
-        let folderURL: URL
-        if let folder, !folder.isEmpty {
-            folderURL = vaultURL.appendingPathComponent(folder, isDirectory: true)
-        } else {
-            folderURL = vaultURL
-        }
-
+        let targetFolder = (folder ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let filename = (item.path as NSString).lastPathComponent
-        let destinationURL = uniqueDestination(in: folderURL, filename: filename)
-
+        let destination = await uniqueRelativeDestination(
+            folder: targetFolder, filename: filename, fileSystem: LocalFileSystem(root: vaultURL))
         do {
-            try acceptInboxItem(item, to: destinationURL)
+            try await fileInboxItem(item, toRelativePath: destination, vaultURL: vaultURL)
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    private func uniqueDestination(in folderURL: URL, filename: String) -> URL {
-        let base = (filename as NSString).deletingPathExtension
-        let ext = (filename as NSString).pathExtension
-        var candidate = folderURL.appendingPathComponent(filename)
-        var suffix = 2
-        while FileManager.default.fileExists(atPath: candidate.standardizedFileURL.path) {
-            let name = ext.isEmpty ? "\(base) \(suffix)" : "\(base) \(suffix).\(ext)"
-            candidate = folderURL.appendingPathComponent(name)
-            suffix += 1
+    /// Shared move-out-of-Inbox flow: validate + move via `InboxAccepter`, drop the item
+    /// from the in-memory inbox list (a full re-scan is async; `openVault`'s reindex re-scans
+    /// shortly after), clear the selection, and reopen the vault to pick up the new document.
+    private func fileInboxItem(_ item: InboxItem, toRelativePath destination: String, vaultURL: URL) async throws {
+        try await InboxAccepter().accept(item, toRelativePath: destination, fileSystem: LocalFileSystem(root: vaultURL))
+        inboxItems.removeAll { $0.id == item.id }
+        sidebarSelection = nil
+        openVault(vaultURL)
+    }
+
+    /// Maps an absolute URL chosen via the destination picker to a vault-relative path,
+    /// rejecting anything outside the vault root.
+    private static func vaultRelativePath(for url: URL, vaultURL: URL) throws -> String {
+        let base = vaultURL.standardizedFileURL.path
+        let full = url.standardizedFileURL.path
+        guard full == base || full.hasPrefix(base + "/") else {
+            throw InboxAcceptanceError.destinationOutsideVault
         }
-        return candidate
+        return String(full.dropFirst(base.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
     /// Creates the missing target of an unresolved HTML link as a stub document,
     /// then re-indexes and selects it. No-op for non-HTML or unresolvable targets.
-    func createDocument(forUnresolved edge: LinkEdge) {
+    func createDocument(forUnresolved edge: LinkEdge) async {
         guard let vaultURL, let relativePath = edge.normalizedTargetPath else { return }
         let ext = (relativePath as NSString).pathExtension.lowercased()
         guard ext == "html" || ext == "htm" else { return }
 
-        let fileURL = vaultURL.appendingPathComponent(relativePath)
-        if !FileManager.default.fileExists(atPath: fileURL.path) {
+        let fileSystem = LocalFileSystem(root: vaultURL)
+        if !(await fileSystem.exists(at: relativePath)) {
             let filename = (relativePath as NSString).lastPathComponent
             let title = edge.linkText.isEmpty ? (filename as NSString).deletingPathExtension : edge.linkText
             do {
-                try FileManager.default.createDirectory(
-                    at: fileURL.deletingLastPathComponent(),
-                    withIntermediateDirectories: true
-                )
-                try Self.stubHTML(title: title).write(to: fileURL, atomically: true, encoding: .utf8)
+                try await fileSystem.createDirectory(at: (relativePath as NSString).deletingLastPathComponent)
+                try await fileSystem.writeText(Self.stubHTML(title: title), to: relativePath, options: [.atomic])
             } catch {
                 errorMessage = error.localizedDescription
                 return
@@ -980,28 +973,28 @@ final class AppState: ObservableObject {
     }
 
     /// Copies a document beside itself ("… copy"), then re-indexes and selects the copy.
-    func duplicateDocument(_ document: DocumentNode) {
+    func duplicateDocument(_ document: DocumentNode) async {
         guard let vaultURL else { return }
         let folder = (document.path as NSString).deletingLastPathComponent
         let filename = (document.path as NSString).lastPathComponent
         let base = (filename as NSString).deletingPathExtension
         let ext = (filename as NSString).pathExtension
         let copyName = ext.isEmpty ? "\(base) copy" : "\(base) copy.\(ext)"
-        let destination = uniqueRelativeDestination(folder: folder, filename: copyName, in: vaultURL)
-        let source = vaultURL.appendingPathComponent(document.path)
+        let fileSystem = LocalFileSystem(root: vaultURL)
+        let destination = await uniqueRelativeDestination(folder: folder, filename: copyName, fileSystem: fileSystem)
         do {
-            try FileManager.default.copyItem(at: source, to: destination.url)
+            try await fileSystem.copy(from: document.path, to: destination)
         } catch {
             errorMessage = error.localizedDescription
             return
         }
-        pendingSelectionId = destination.relativePath
+        pendingSelectionId = destination
         beginSession(at: vaultURL)
     }
 
     /// Moves a document into another vault folder (`nil` = root), resolving name
     /// collisions, then re-indexes and selects it at its new path.
-    func moveDocument(_ document: DocumentNode, toFolder folder: String?) {
+    func moveDocument(_ document: DocumentNode, toFolder folder: String?) async {
         guard let vaultURL else { return }
         let targetFolder = (folder ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let currentFolder = (document.path as NSString).deletingLastPathComponent
@@ -1014,26 +1007,23 @@ final class AppState: ObservableObject {
         }
 
         let filename = (document.path as NSString).lastPathComponent
-        let destination = uniqueRelativeDestination(folder: targetFolder, filename: filename, in: vaultURL)
-        let source = vaultURL.appendingPathComponent(document.path)
+        let fileSystem = LocalFileSystem(root: vaultURL)
+        let destination = await uniqueRelativeDestination(folder: targetFolder, filename: filename, fileSystem: fileSystem)
         do {
-            try FileManager.default.createDirectory(
-                at: destination.url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try FileManager.default.moveItem(at: source, to: destination.url)
+            try await fileSystem.createDirectory(at: (destination as NSString).deletingLastPathComponent)
+            try await fileSystem.move(from: document.path, to: destination)
         } catch {
             errorMessage = error.localizedDescription
             return
         }
-        removeEmptyFolderIfNeeded(currentFolder)
-        pendingSelectionId = destination.relativePath
+        await removeEmptyFolderIfNeeded(currentFolder, fileSystem: fileSystem)
+        pendingSelectionId = destination
         beginSession(at: vaultURL)
     }
 
     /// Renames a document in place (folder unchanged). Forces an .html extension and
     /// strips any path components from the typed name, then re-indexes and reselects.
-    func renameDocument(_ document: DocumentNode, to newName: String) {
+    func renameDocument(_ document: DocumentNode, to newName: String) async {
         guard let vaultURL else { return }
         let folder = (document.path as NSString).deletingLastPathComponent
         let originalExt = (document.path as NSString).pathExtension
@@ -1049,24 +1039,23 @@ final class AppState: ObservableObject {
         }
         guard filename != (document.path as NSString).lastPathComponent else { return }
 
-        let destination = uniqueRelativeDestination(folder: folder, filename: filename, in: vaultURL)
-        let source = vaultURL.appendingPathComponent(document.path)
+        let fileSystem = LocalFileSystem(root: vaultURL)
+        let destination = await uniqueRelativeDestination(folder: folder, filename: filename, fileSystem: fileSystem)
         do {
-            try FileManager.default.moveItem(at: source, to: destination.url)
+            try await fileSystem.move(from: document.path, to: destination)
         } catch {
             errorMessage = error.localizedDescription
             return
         }
-        pendingSelectionId = destination.relativePath
+        pendingSelectionId = destination
         beginSession(at: vaultURL)
     }
 
     /// Moves a document to the Trash (recoverable, unlike deletion), then re-indexes.
-    func trashDocument(_ document: DocumentNode) {
+    func trashDocument(_ document: DocumentNode) async {
         guard let vaultURL else { return }
-        let url = vaultURL.appendingPathComponent(document.path)
         do {
-            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            try await LocalFileSystem(root: vaultURL).trash(at: document.path)
         } catch {
             errorMessage = error.localizedDescription
             return
@@ -1079,7 +1068,7 @@ final class AppState: ObservableObject {
 
     /// Creates a new stub document in the given vault folder (`nil` = root), then
     /// re-indexes and selects it. Reuses the same stub HTML as unresolved-link creation.
-    func createDocument(inFolder folder: String?, named name: String) {
+    func createDocument(inFolder folder: String?, named name: String) async {
         guard let vaultURL else { return }
         let targetFolder = (folder ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !isInboxRelativePath(targetFolder) else {
@@ -1098,26 +1087,24 @@ final class AppState: ObservableObject {
             errorMessage = "A document name can’t start with a dot."
             return
         }
-        let destination = uniqueRelativeDestination(folder: targetFolder, filename: filename, in: vaultURL)
+        let fileSystem = LocalFileSystem(root: vaultURL)
+        let destination = await uniqueRelativeDestination(folder: targetFolder, filename: filename, fileSystem: fileSystem)
         let title = (filename as NSString).deletingPathExtension
         do {
-            try FileManager.default.createDirectory(
-                at: destination.url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try Self.stubHTML(title: title).write(to: destination.url, atomically: true, encoding: .utf8)
+            try await fileSystem.createDirectory(at: (destination as NSString).deletingLastPathComponent)
+            try await fileSystem.writeText(Self.stubHTML(title: title), to: destination, options: [.atomic])
         } catch {
             errorMessage = error.localizedDescription
             return
         }
-        pendingSelectionId = destination.relativePath
+        pendingSelectionId = destination
         beginSession(at: vaultURL)
     }
 
     /// Creates an empty folder under `parent` (`nil` = root). The tree is document-
     /// derived, so the folder is tracked in `pendingEmptyFolders` to stay visible until
     /// a document is added — no re-index needed since the document set didn't change.
-    func createFolder(named name: String, inParent parent: String?) {
+    func createFolder(named name: String, inParent parent: String?) async {
         guard let vaultURL else { return }
         // Accept a typed nested path ("Reports/2024") rather than silently collapsing it
         // to the last component; clean each segment and reject dot-leading ones.
@@ -1137,10 +1124,10 @@ final class AppState: ObservableObject {
         }
         // Bump "name 2", "name 3", … on collision so "New Folder…" never silently merges
         // into an existing folder (matching duplicate/move/rename/createDocument).
-        let relative = uniqueFolderRelativePath(base, in: vaultURL)
-        let url = vaultURL.appendingPathComponent(relative, isDirectory: true)
+        let fileSystem = LocalFileSystem(root: vaultURL)
+        let relative = await uniqueFolderRelativePath(base, fileSystem: fileSystem)
         do {
-            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            try await fileSystem.createDirectory(at: relative)
         } catch {
             errorMessage = error.localizedDescription
             return
@@ -1378,10 +1365,10 @@ final class AppState: ObservableObject {
     }
 
     /// Moves an unfiled inbox item to the Trash and refreshes the inbox.
-    func trashInboxItem(_ item: InboxItem) {
-        let url = URL(fileURLWithPath: item.absolutePath)
+    func trashInboxItem(_ item: InboxItem) async {
+        guard let vaultURL else { return }
         do {
-            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            try await LocalFileSystem(root: vaultURL).trash(at: item.path)
         } catch {
             errorMessage = error.localizedDescription
             return
@@ -1408,10 +1395,10 @@ final class AppState: ObservableObject {
     /// Returns `base` (vault-relative) bumped to "base 2", "base 3", … until it names a
     /// path that doesn't yet exist on disk, so folder creation never merges into an
     /// existing directory.
-    private func uniqueFolderRelativePath(_ base: String, in vaultURL: URL) -> String {
+    private func uniqueFolderRelativePath(_ base: String, fileSystem: VaultFileSystem) async -> String {
         var candidate = base
         var suffix = 2
-        while FileManager.default.fileExists(atPath: vaultURL.appendingPathComponent(candidate).standardizedFileURL.path) {
+        while await fileSystem.exists(at: candidate) {
             candidate = "\(base) \(suffix)"
             suffix += 1
         }
@@ -1421,19 +1408,18 @@ final class AppState: ObservableObject {
     /// Removes a now-empty source folder after a move so the sidebar (which is derived
     /// from documents) and Finder don't drift apart. Conservative: never touches the
     /// vault root, the Inbox, or a folder that still holds anything (incl. hidden files).
-    private func removeEmptyFolderIfNeeded(_ relativeFolder: String) {
-        guard let vaultURL, !relativeFolder.isEmpty, !isInboxRelativePath(relativeFolder) else { return }
-        let url = vaultURL.appendingPathComponent(relativeFolder, isDirectory: true)
-        guard let contents = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil),
+    private func removeEmptyFolderIfNeeded(_ relativeFolder: String, fileSystem: VaultFileSystem) async {
+        guard !relativeFolder.isEmpty, !isInboxRelativePath(relativeFolder) else { return }
+        guard let contents = try? await fileSystem.contentsOfDirectory(at: relativeFolder),
               contents.isEmpty else { return }
-        try? FileManager.default.removeItem(at: url)
+        try? await fileSystem.remove(at: relativeFolder)
         pendingEmptyFolders.remove(relativeFolder)
     }
 
     /// Builds a non-colliding destination for a file going into `folder` (vault-relative,
     /// "" = root), returning both the absolute URL and the matching relative path (which
     /// is also the document's index id). Bumps "name 2", "name 3", … on collision.
-    private func uniqueRelativeDestination(folder: String, filename: String, in vaultURL: URL) -> (url: URL, relativePath: String) {
+    private func uniqueRelativeDestination(folder: String, filename: String, fileSystem: VaultFileSystem) async -> String {
         let base = (filename as NSString).deletingPathExtension
         let ext = (filename as NSString).pathExtension
 
@@ -1443,13 +1429,11 @@ final class AppState: ObservableObject {
 
         var name = filename
         var suffix = 2
-        var url = vaultURL.appendingPathComponent(relativePath(name))
-        while FileManager.default.fileExists(atPath: url.standardizedFileURL.path) {
+        while await fileSystem.exists(at: relativePath(name)) {
             name = ext.isEmpty ? "\(base) \(suffix)" : "\(base) \(suffix).\(ext)"
-            url = vaultURL.appendingPathComponent(relativePath(name))
             suffix += 1
         }
-        return (url, relativePath(name))
+        return relativePath(name)
     }
 
     private func startInboxPolling() {

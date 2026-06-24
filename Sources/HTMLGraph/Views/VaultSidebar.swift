@@ -292,7 +292,7 @@ enum SidebarActions {
             defaultValue: "Untitled",
             confirmTitle: "Create"
         ) else { return }
-        appState.createDocument(inFolder: folder, named: name)
+        Task { await appState.createDocument(inFolder: folder, named: name) }
     }
 
     static func newFolder(inParent parent: String?, appState: AppState) {
@@ -304,12 +304,12 @@ enum SidebarActions {
             defaultValue: "New Folder",
             confirmTitle: "Create"
         ) else { return }
-        appState.createFolder(named: name, inParent: parent)
+        Task { await appState.createFolder(named: name, inParent: parent) }
     }
 
     static func duplicate(_ document: DocumentNode, appState: AppState) {
         guard EditorGuard.confirmLeavingEditor(appState) else { return }
-        appState.duplicateDocument(document)
+        Task { await appState.duplicateDocument(document) }
     }
 
     static func rename(_ document: DocumentNode, appState: AppState) {
@@ -324,7 +324,7 @@ enum SidebarActions {
             defaultValue: ((document.path as NSString).lastPathComponent as NSString).deletingPathExtension,
             confirmTitle: "Rename"
         ) else { return }
-        appState.renameDocument(document, to: name)
+        Task { await appState.renameDocument(document, to: name) }
     }
 
     static func move(_ document: DocumentNode, to folder: String?, appState: AppState) {
@@ -338,7 +338,7 @@ enum SidebarActions {
                 confirmTitle: "Move"
             ) else { return }
         }
-        appState.moveDocument(document, toFolder: folder)
+        Task { await appState.moveDocument(document, toFolder: folder) }
     }
 
     static func delete(_ document: DocumentNode, appState: AppState) {
@@ -352,7 +352,7 @@ enum SidebarActions {
             message: "“\(document.title)” will be moved to the Trash.\(extra)",
             confirmTitle: "Move to Trash"
         ) else { return }
-        appState.trashDocument(document)
+        Task { await appState.trashDocument(document) }
     }
 
     /// Files an unfiled inbox item into the vault. Guarded because `addToVault` accepts the
@@ -362,7 +362,7 @@ enum SidebarActions {
     /// selection-change guard doesn't cover them.
     static func addToVault(_ item: InboxItem, folder: String?, appState: AppState) {
         guard EditorGuard.confirmLeavingEditor(appState) else { return }
-        appState.addToVault(item, folder: folder)
+        Task { await appState.addToVault(item, folder: folder) }
     }
 
     static func deleteInbox(_ item: InboxItem, appState: AppState) {
@@ -371,7 +371,7 @@ enum SidebarActions {
             message: "“\(item.title)” will be moved to the Trash.",
             confirmTitle: "Move to Trash"
         ) else { return }
-        appState.trashInboxItem(item)
+        Task { await appState.trashInboxItem(item) }
     }
 
     private static func documentsWord(_ count: Int) -> String {

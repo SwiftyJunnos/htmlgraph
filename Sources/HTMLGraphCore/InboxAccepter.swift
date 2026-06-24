@@ -8,60 +8,42 @@ public enum InboxAcceptanceError: Error, Equatable, Sendable {
 }
 
 public struct InboxAccepter {
-    private let fileManager: FileManager
+    public init() {}
 
-    public init(fileManager: FileManager = .default) {
-        self.fileManager = fileManager
-    }
-
+    /// Moves an unfiled inbox item to a vault-relative `destination` over `fileSystem`.
+    /// Validates: the source is inside `Inbox/`; the destination is inside the vault (no
+    /// `..` escape) and NOT inside `Inbox/`; and nothing already exists there. Returns the
+    /// destination's vault-relative path.
     @discardableResult
-    public func accept(_ item: InboxItem, to destinationURL: URL, vaultURL: URL) throws -> URL {
-        let sourceURL = URL(fileURLWithPath: item.absolutePath)
-        let standardizedVaultURL = vaultURL.standardizedFileURL
-        let standardizedSourceURL = sourceURL.standardizedFileURL
-        let standardizedDestinationURL = destinationURL.standardizedFileURL
-
-        guard isInsideInbox(standardizedSourceURL, vaultURL: standardizedVaultURL) else {
+    public func accept(
+        _ item: InboxItem,
+        toRelativePath destination: String,
+        fileSystem: VaultFileSystem
+    ) async throws -> String {
+        let source = item.path
+        guard isInsideInbox(source) else {
             throw InboxAcceptanceError.sourceOutsideInbox
         }
 
-        guard isInsideVault(standardizedDestinationURL, vaultURL: standardizedVaultURL) else {
+        let cleanDestination = destination.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !cleanDestination.isEmpty,
+              !cleanDestination.split(separator: "/", omittingEmptySubsequences: false).contains("..") else {
             throw InboxAcceptanceError.destinationOutsideVault
         }
-
-        guard !isInsideInbox(standardizedDestinationURL, vaultURL: standardizedVaultURL) else {
+        guard !isInsideInbox(cleanDestination) else {
             throw InboxAcceptanceError.destinationInsideInbox
         }
-
-        guard !fileManager.fileExists(atPath: standardizedDestinationURL.path) else {
+        guard !(await fileSystem.exists(at: cleanDestination)) else {
             throw InboxAcceptanceError.destinationAlreadyExists
         }
 
-        try fileManager.createDirectory(
-            at: standardizedDestinationURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try fileManager.moveItem(at: standardizedSourceURL, to: standardizedDestinationURL)
-        return standardizedDestinationURL
+        try await fileSystem.createDirectory(at: (cleanDestination as NSString).deletingLastPathComponent)
+        try await fileSystem.move(from: source, to: cleanDestination)
+        return cleanDestination
     }
 
-    private func isInsideInbox(_ url: URL, vaultURL: URL) -> Bool {
-        let inboxURL = vaultURL.appendingPathComponent(InboxScanner.inboxDirectoryName, isDirectory: true)
-        return isLocated(url, inside: inboxURL)
-    }
-
-    private func isInsideVault(_ url: URL, vaultURL: URL) -> Bool {
-        isLocated(url, inside: vaultURL)
-    }
-
-    private func isLocated(_ url: URL, inside directoryURL: URL) -> Bool {
-        let itemComponents = url.standardizedFileURL.pathComponents
-        let directoryComponents = directoryURL.standardizedFileURL.pathComponents
-
-        guard itemComponents.count >= directoryComponents.count else {
-            return false
-        }
-
-        return zip(directoryComponents, itemComponents).allSatisfy { $0 == $1 }
+    private func isInsideInbox(_ relativePath: String) -> Bool {
+        relativePath == InboxScanner.inboxDirectoryName ||
+            relativePath.hasPrefix("\(InboxScanner.inboxDirectoryName)/")
     }
 }

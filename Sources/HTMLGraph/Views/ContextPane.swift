@@ -117,7 +117,7 @@ struct ContextPane: View {
                     if isCreatable(edge) {
                         Button("Create") {
                             guard EditorGuard.confirmLeavingEditor(appState) else { return }
-                            appState.createDocument(forUnresolved: edge)
+                            Task { await appState.createDocument(forUnresolved: edge) }
                         }
                         .buttonStyle(.borderless)
                         .help("Create this missing document and open it.")
@@ -130,7 +130,7 @@ struct ContextPane: View {
                     if isCreatable(edge) {
                         Button("Create Document") {
                             guard EditorGuard.confirmLeavingEditor(appState) else { return }
-                            appState.createDocument(forUnresolved: edge)
+                            Task { await appState.createDocument(forUnresolved: edge) }
                         }
                     }
                 }

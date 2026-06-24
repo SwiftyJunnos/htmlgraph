@@ -10,13 +10,14 @@ final class InboxAccepterTests: XCTestCase {
 
         let scanned = try await InboxScanner().scanInbox(at: vaultURL)
         let item = try XCTUnwrap(scanned.first)
-        let destinationURL = vaultURL.appendingPathComponent("Notes/idea.html")
 
-        let acceptedURL = try InboxAccepter().accept(item, to: destinationURL, vaultURL: vaultURL)
+        let accepted = try await InboxAccepter().accept(
+            item, toRelativePath: "Notes/idea.html", fileSystem: LocalFileSystem(root: vaultURL))
 
-        XCTAssertEqual(acceptedURL.standardizedFileURL.path, destinationURL.standardizedFileURL.path)
+        XCTAssertEqual(accepted, "Notes/idea.html")
         XCTAssertFalse(FileManager.default.fileExists(atPath: item.absolutePath))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: destinationURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: vaultURL.appendingPathComponent("Notes/idea.html").path))
         let remaining = try await InboxScanner().scanInbox(at: vaultURL)
         XCTAssertEqual(remaining, [])
     }
@@ -25,18 +26,17 @@ final class InboxAccepterTests: XCTestCase {
         let vaultURL = try makeTemporaryVault(files: [
             "Inbox/idea.html": "<html><head><title>AI Idea</title></head><body></body></html>"
         ])
-        let outsideURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("HTMLGraphInboxOutside-\(UUID().uuidString).html")
-        defer {
-            try? FileManager.default.removeItem(at: vaultURL)
-            try? FileManager.default.removeItem(at: outsideURL)
-        }
+        defer { try? FileManager.default.removeItem(at: vaultURL) }
 
         let scanned = try await InboxScanner().scanInbox(at: vaultURL)
         let item = try XCTUnwrap(scanned.first)
+        let fileSystem = LocalFileSystem(root: vaultURL)
 
-        XCTAssertThrowsError(try InboxAccepter().accept(item, to: outsideURL, vaultURL: vaultURL)) { error in
-            XCTAssertEqual(error as? InboxAcceptanceError, .destinationOutsideVault)
+        do {
+            _ = try await InboxAccepter().accept(item, toRelativePath: "../outside.html", fileSystem: fileSystem)
+            XCTFail("expected destinationOutsideVault")
+        } catch let error as InboxAcceptanceError {
+            XCTAssertEqual(error, .destinationOutsideVault)
         }
         XCTAssertTrue(FileManager.default.fileExists(atPath: item.absolutePath))
     }
@@ -50,21 +50,20 @@ final class InboxAccepterTests: XCTestCase {
 
         let scanned = try await InboxScanner().scanInbox(at: vaultURL)
         let item = try XCTUnwrap(scanned.first)
+        let fileSystem = LocalFileSystem(root: vaultURL)
 
-        XCTAssertThrowsError(try InboxAccepter().accept(
-            item,
-            to: vaultURL.appendingPathComponent("Inbox/accepted.html"),
-            vaultURL: vaultURL
-        )) { error in
-            XCTAssertEqual(error as? InboxAcceptanceError, .destinationInsideInbox)
+        do {
+            _ = try await InboxAccepter().accept(item, toRelativePath: "Inbox/accepted.html", fileSystem: fileSystem)
+            XCTFail("expected destinationInsideInbox")
+        } catch let error as InboxAcceptanceError {
+            XCTAssertEqual(error, .destinationInsideInbox)
         }
 
-        XCTAssertThrowsError(try InboxAccepter().accept(
-            item,
-            to: vaultURL.appendingPathComponent("Notes/existing.html"),
-            vaultURL: vaultURL
-        )) { error in
-            XCTAssertEqual(error as? InboxAcceptanceError, .destinationAlreadyExists)
+        do {
+            _ = try await InboxAccepter().accept(item, toRelativePath: "Notes/existing.html", fileSystem: fileSystem)
+            XCTFail("expected destinationAlreadyExists")
+        } catch let error as InboxAcceptanceError {
+            XCTAssertEqual(error, .destinationAlreadyExists)
         }
     }
 

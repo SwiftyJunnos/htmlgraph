@@ -1,6 +1,6 @@
 # Remote Vault over SSH — In-app SFTP filesystem layer
 
-Status: M4 done — readers (InboxScanner) + sidecars async, inbox-poll freeze fixed. Next: M5 (mutations).
+Status: M5 done — file-op mutations + inbox accept async. Next: M6 (editor save path).
 Started: 2026-06-24
 Owner: Junnos
 
@@ -148,29 +148,42 @@ Operations the protocol must cover, by call site:
   intentionally NOT migrated — it's an inherently local index cache (stays local even for remote
   vaults; see M9 cache relocation). Verified: `swift test` (132 Core + app) + `xcodebuild`.
 
-- **M5 — Mutations (the SwiftUI-async ripple).**
-  `InboxAccepter` + `AppState` file ops (create/move/rename/trash/duplicate/createFolder/
-  addToVault) + editor save path (`reindexDocument` → `async`, `saveEditorBuffer`/conflict
-  resolution) through the FS. This is where method signatures touching SwiftUI go `async`
-  (wrap call sites in `Task`, or thread async through) and `FileManager.trashItem` gets a
-  remote fallback.
+- **M5 — File-op mutations + inbox accept (the SwiftUI-async ripple). ✅ DONE (2026-06-24).**
+  `AppState` file ops (createDocument×2 / move / rename / trash / duplicate / createFolder /
+  addToVault / acceptInboxItem / trashInboxItem) are `async` over the FS; helpers
+  (`uniqueRelativeDestination`, `uniqueFolderRelativePath`, `removeEmptyFolderIfNeeded`) async;
+  URL-based `uniqueDestination` removed. `InboxAccepter.accept` rewritten to
+  `accept(_:toRelativePath:fileSystem:) async` (relative-path containment checks); AppState
+  converts the picker URL → relative via `vaultRelativePath`. SwiftUI call sites
+  (VaultSidebar `SidebarActions`, ContextPane, ContentView) wrap the final call in `Task`;
+  sync guards/prompts run first. Tests `await` the ops so synchronous assertions hold.
+  Note: `LocalFileSystem.trash` still uses `FileManager.trashItem`; the remote-Trash fallback
+  lands with the SFTP backend (M9). Verified: `swift test` (132) + `xcodebuild`.
 
-- **M6 — Migrate the preview servers + UI gating.**
+- **M6 — Editor save path.**
+  `VaultIndexer.reindexDocument` → `async` over the FS; `AppState.beginEditing` /
+  `saveEditorBuffer` / `writeEditorText` / conflict resolution + `editorFileURL` /
+  `modificationDate` through the FS. `saveEditorBuffer() -> Bool` becomes `async`, so its
+  callers (ReaderPane ⌘S, `EditorGuard` in EditorSession) and `beginEditing` (whose `Bool` the
+  reader uses in an `if`) must thread `await`/`Task`. Content-hash conflict detection ports
+  unchanged.
+
+- **M7 — Migrate the preview servers + UI gating.**
   `VaultHTTPServer` responder and `VaultResourceSchemeHandler` read through the FS (range
   reads → `readRange`). Add a connection pool / concurrency so per-request remote I/O doesn't
   serialize. Hide/disable local-only UI actions (Reveal in Finder, external editor) for
   remote vaults.
 
-- **M7 — Vault identity + selection model.**
+- **M8 — Vault identity + selection model.**
   Generalize `RecentVault` / `VaultIndex.vaultId` to a `VaultRef` (local URL **or**
   remote host+path). A "Connect to Remote…" dialog; credentials in Keychain; host-key TOFU.
 
-- **M8 — `SFTPFileSystem` implementation.**
+- **M9 — `SFTPFileSystem` implementation.**
   Citadel/SwiftNIO backend: connection actor, pooling, timeouts, reconnect/backoff,
   atomic write (temp + `posix-rename@openssh.com` + read-back), `trash` = move to vault
   `.htmlgraph/.trash`, metadata/size cache to cut round-trips.
 
-- **M9 — Hardening + cache relocation.**
+- **M10 — Hardening + cache relocation.**
   Sidecars/index cache to `~/Library/Caches` for remote; surface connection-loss instead of
   silently indexing an empty vault; timeouts everywhere; perf pass (pipelined reads).
 

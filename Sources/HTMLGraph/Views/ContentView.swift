@@ -120,10 +120,12 @@ struct ContentView: View {
             return
         }
 
-        do {
-            try appState.acceptInboxItem(item, to: destinationURL)
-        } catch {
-            appState.errorMessage = error.localizedDescription
+        Task {
+            do {
+                try await appState.acceptInboxItem(item, to: destinationURL)
+            } catch {
+                appState.errorMessage = error.localizedDescription
+            }
         }
     }
 }
