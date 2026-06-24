@@ -123,9 +123,24 @@ public struct SFTPFileSystem: VaultFileSystem {
         let client = try await connection.client()
         let file = try await client.openFile(filePath: remotePath(relativePath), flags: .read)
         do {
-            let buffer = try await file.read(from: UInt64(range.lowerBound), length: UInt32(range.count))
+            // SFTP permits SHORT reads — a server caps each SSH_FXP_DATA response (OpenSSH at
+            // ~32 KB) regardless of the requested length — so a single read truncates any larger
+            // range, and the loopback responder's `partial.count == range.count` check then 500s.
+            // Loop, advancing the offset, until the full range is gathered or EOF (empty read).
+            var collected = Data()
+            var offset = UInt64(range.lowerBound)
+            var remaining = range.count
+            while remaining > 0 {
+                let chunk = try await file.read(
+                    from: offset, length: UInt32(min(remaining, Int(UInt32.max))))
+                let bytes = Data(chunk.readableBytesView)
+                if bytes.isEmpty { break } // EOF / end of file before the range was fully satisfied
+                collected.append(bytes)
+                offset += UInt64(bytes.count)
+                remaining -= bytes.count
+            }
             try await file.close()
-            return Data(buffer.readableBytesView)
+            return collected
         } catch {
             try? await file.close()
             throw error

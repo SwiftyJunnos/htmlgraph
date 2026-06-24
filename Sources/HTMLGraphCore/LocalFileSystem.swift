@@ -30,8 +30,17 @@ public struct LocalFileSystem: VaultFileSystem {
 
     // MARK: - Path resolution + containment
 
+    /// Symlink-resolved boundary check, reused for every resolve. Matches the containment the
+    /// app enforced through `VaultSecurityPolicy.allows` before this file-system seam existed.
+    private static let containment = VaultSecurityPolicy(mode: .safe, allowsNetworkAccess: false)
+
     /// Resolves a vault-relative, "/"-separated path to an absolute URL under `root`,
     /// rejecting any `..` escape with `outsideVault`. `""` resolves to the root itself.
+    ///
+    /// Defense in depth: a `..`-free path can still escape via a symlink *inside* the vault
+    /// (e.g. `link -> /etc`). After building the URL we verify its symlink-resolved location is
+    /// still under the (also-resolved) root, restoring the boundary `VaultSecurityPolicy.allows`
+    /// enforced at the loopback server + editor before those paths were routed through here.
     private func resolve(_ relativePath: String) throws -> URL {
         let components = relativePath
             .split(separator: "/", omittingEmptySubsequences: true)
@@ -39,7 +48,11 @@ public struct LocalFileSystem: VaultFileSystem {
         guard !components.contains("..") else {
             throw VaultFileSystemError.outsideVault(relativePath)
         }
-        return components.reduce(root) { $0.appendingPathComponent($1) }
+        let url = components.reduce(root) { $0.appendingPathComponent($1) }
+        guard Self.containment.allows(url, vaultRoot: root) else {
+            throw VaultFileSystemError.outsideVault(relativePath)
+        }
+        return url
     }
 
     /// The absolute on-disk path for a vault-relative path. Local-only affordance used to

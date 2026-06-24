@@ -71,6 +71,33 @@ final class LocalFileSystemTests: XCTestCase {
         }
     }
 
+    func testSymlinkEscapingVaultThrowsOutsideVault() async throws {
+        let root = makeTemporaryDirectory()
+        let outside = makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        // A secret living OUTSIDE the vault, reachable only by following a symlink.
+        try "top secret".write(
+            to: outside.appendingPathComponent("secret.txt"), atomically: true, encoding: .utf8)
+        // A `..`-free symlink INSIDE the vault that points at the outside directory.
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("link"), withDestinationURL: outside)
+
+        let fs = LocalFileSystem(root: root)
+
+        // Reading an outside file by following the in-vault symlink must be refused — a plain
+        // `..` check would miss this, so it guards the restored symlink-resolved containment.
+        await assertThrows(.outsideVault("link/secret.txt")) {
+            _ = try await fs.readData(at: "link/secret.txt")
+        }
+        // And overwriting an outside file through the symlink must be refused too.
+        await assertThrows(.outsideVault("link/secret.txt")) {
+            try await fs.writeText("pwned", to: "link/secret.txt", options: [.atomic])
+        }
+    }
+
     // MARK: - Read / write round-trips
 
     func testWriteThenReadTextRoundTrips() async throws {

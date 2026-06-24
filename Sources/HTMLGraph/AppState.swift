@@ -1445,10 +1445,36 @@ final class AppState: ObservableObject {
         editorConflict = nil
     }
 
-    /// Writes `text` atomically, then patches the index in place for just this document.
-    /// Deliberately avoids `beginSession` so the selection, scroll, and editor survive.
+    /// Serializes editor writes so overlapping saves — a held ⌘S, the Save button racing ⌘S, a
+    /// save-on-leave overlapping an explicit save, or a conflict overwrite — never issue two
+    /// concurrent writes of the same file (each `writeText` is async + a network round-trip for a
+    /// remote vault). Each call waits for any in-flight write, then performs its own with the
+    /// latest text; edits typed during the window stay dirty and save on the next pass.
+    private var editorWriteChain: Task<Bool, Never>?
+    private var editorWriteToken = 0
+
     @discardableResult
     private func writeEditorText(_ text: String, toRelativePath relativePath: String, documentId: String, fileSystem: VaultFileSystem) async -> Bool {
+        editorWriteToken += 1
+        let token = editorWriteToken
+        let previous = editorWriteChain
+        let task = Task { @MainActor [weak self] in
+            _ = await previous?.value
+            guard let self else { return false }
+            return await self.performEditorWrite(
+                text, toRelativePath: relativePath, documentId: documentId, fileSystem: fileSystem)
+        }
+        editorWriteChain = task
+        let result = await task.value
+        // Release the chain once we're the latest write (Task is a value type, so identity
+        // can't be compared — a generation token tells us no newer save has chained on).
+        if editorWriteToken == token { editorWriteChain = nil }
+        return result
+    }
+
+    /// Writes `text` atomically, then patches the index in place for just this document.
+    /// Deliberately avoids `beginSession` so the selection, scroll, and editor survive.
+    private func performEditorWrite(_ text: String, toRelativePath relativePath: String, documentId: String, fileSystem: VaultFileSystem) async -> Bool {
         do {
             try await fileSystem.writeText(text, to: relativePath, options: [.atomic])
         } catch {
