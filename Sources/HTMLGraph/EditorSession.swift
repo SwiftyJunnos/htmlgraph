@@ -71,14 +71,14 @@ enum EditorGuard {
     /// Returns true when it is safe to proceed (nothing dirty, the user saved, or the
     /// user discarded). Returns false to abort the caller's action (the user cancelled,
     /// or the save surfaced a conflict that must be resolved first).
-    static func confirmLeavingEditor(_ appState: AppState) -> Bool {
+    static func confirmLeavingEditor(_ appState: AppState) async -> Bool {
         guard appState.hasUnsavedEdits, let buffer = appState.editorBuffer else { return true }
         let title = appState.index?.document(id: buffer.documentId)?.title ?? buffer.documentId
         switch promptUnsavedEdits(documentTitle: title) {
         case .save:
             // A clean save clears the dirty flag; a conflict blocks the navigation until
             // the user resolves it via the conflict alert.
-            return appState.saveEditorBuffer()
+            return await appState.saveEditorBuffer()
         case .discard:
             appState.endEditing()
             return true

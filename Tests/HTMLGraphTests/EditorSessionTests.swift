@@ -36,7 +36,8 @@ final class EditorSessionTests: XCTestCase {
         let (appState, _) = try await openedVault(files: ["index.html": source])
 
         let document = try XCTUnwrap(appState.index?.document(id: "index.html"))
-        XCTAssertTrue(appState.beginEditing(document))
+        let didBegin = await appState.beginEditing(document)
+        XCTAssertTrue(didBegin)
 
         let buffer = try XCTUnwrap(appState.editorBuffer)
         XCTAssertEqual(buffer.documentId, "index.html")
@@ -59,7 +60,8 @@ final class EditorSessionTests: XCTestCase {
             lastModified: .distantPast
         )
 
-        XCTAssertFalse(appState.beginEditing(escaping))
+        let didBegin = await appState.beginEditing(escaping)
+        XCTAssertFalse(didBegin)
         XCTAssertNil(appState.editorBuffer)
         XCTAssertNotNil(appState.errorMessage)
     }
@@ -71,13 +73,15 @@ final class EditorSessionTests: XCTestCase {
             "index.html": "<html><head><title>Home</title></head><body></body></html>"
         ])
         let document = try XCTUnwrap(appState.index?.document(id: "index.html"))
-        XCTAssertTrue(appState.beginEditing(document))
+        let didBegin = await appState.beginEditing(document)
+        XCTAssertTrue(didBegin)
 
         let edited = "<html><head><title>Renamed</title></head><body><p>new</p></body></html>"
         appState.updateEditorText(edited)
         XCTAssertTrue(appState.hasUnsavedEdits)
 
-        XCTAssertTrue(appState.saveEditorBuffer())
+        let didSave = await appState.saveEditorBuffer()
+        XCTAssertTrue(didSave)
 
         // Disk reflects the edit.
         let onDisk = try String(contentsOf: vaultURL.appendingPathComponent("index.html"), encoding: .utf8)
@@ -103,9 +107,11 @@ final class EditorSessionTests: XCTestCase {
             trustMode: .safe, allowsNetworkAccess: false
         )
 
-        XCTAssertTrue(appState.beginEditing(before))
+        let didBegin = await appState.beginEditing(before)
+        XCTAssertTrue(didBegin)
         appState.updateEditorText("<html><head><title>Home</title></head><body><p>changed</p></body></html>")
-        XCTAssertTrue(appState.saveEditorBuffer())
+        let didSave = await appState.saveEditorBuffer()
+        XCTAssertTrue(didSave)
 
         let after = try XCTUnwrap(appState.index?.document(id: "index.html"))
         XCTAssertNotEqual(after.contentHash, before.contentHash)
@@ -123,7 +129,8 @@ final class EditorSessionTests: XCTestCase {
         let source = "<html><head><title>Home</title></head><body></body></html>"
         let (appState, _) = try await openedVault(files: ["index.html": source])
         let document = try XCTUnwrap(appState.index?.document(id: "index.html"))
-        XCTAssertTrue(appState.beginEditing(document))
+        let didBegin = await appState.beginEditing(document)
+        XCTAssertTrue(didBegin)
 
         appState.updateEditorText("<html>scratch</html>")
         XCTAssertTrue(appState.hasUnsavedEdits)
@@ -145,7 +152,8 @@ final class EditorSessionTests: XCTestCase {
         let source = "<!DOCTYPE html><html><head><title>Home</title></head><body><p>old</p></body></html>"
         let (appState, vaultURL) = try await openedVault(files: ["index.html": source])
         let document = try XCTUnwrap(appState.index?.document(id: "index.html"))
-        XCTAssertTrue(appState.beginEditing(document))
+        let didBegin = await appState.beginEditing(document)
+        XCTAssertTrue(didBegin)
         appState.beginVisualSession()
         XCTAssertFalse(appState.hasUnsavedEdits)
 
@@ -161,7 +169,8 @@ final class EditorSessionTests: XCTestCase {
         XCTAssertEqual(appState.editorBuffer?.currentText, expected)
         XCTAssertTrue(appState.hasUnsavedEdits)
 
-        XCTAssertTrue(appState.saveEditorBuffer())
+        let didSave = await appState.saveEditorBuffer()
+        XCTAssertTrue(didSave)
         let onDisk = try String(contentsOf: vaultURL.appendingPathComponent("index.html"), encoding: .utf8)
         XCTAssertEqual(onDisk, expected)
         // Title (from <head>, which we never touched) is intact; baseline reset to the save.
@@ -176,7 +185,8 @@ final class EditorSessionTests: XCTestCase {
         let source = "<html><head><title>T</title></head><body><p >x</p></body></html>"
         let (appState, _) = try await openedVault(files: ["index.html": source])
         let document = try XCTUnwrap(appState.index?.document(id: "index.html"))
-        XCTAssertTrue(appState.beginEditing(document))
+        let didBegin = await appState.beginEditing(document)
+        XCTAssertTrue(didBegin)
         appState.beginVisualSession()
 
         sendVisualBaseline(appState, documentId: "index.html", body: "<p>x</p>")  // normalized form
@@ -194,7 +204,8 @@ final class EditorSessionTests: XCTestCase {
         let source = "<!DOCTYPE html><html><head><title>T</title></head><p>x</p></html>"
         let (appState, vaultURL) = try await openedVault(files: ["index.html": source])
         let document = try XCTUnwrap(appState.index?.document(id: "index.html"))
-        XCTAssertTrue(appState.beginEditing(document))
+        let didBegin = await appState.beginEditing(document)
+        XCTAssertTrue(didBegin)
         appState.beginVisualSession()
 
         // Initial snapshot: splice can't locate a body, so the clean reference is the full
@@ -208,7 +219,8 @@ final class EditorSessionTests: XCTestCase {
         XCTAssertEqual(appState.editorBuffer?.currentText, full)
         XCTAssertTrue(appState.hasUnsavedEdits)
 
-        XCTAssertTrue(appState.saveEditorBuffer())
+        let didSave = await appState.saveEditorBuffer()
+        XCTAssertTrue(didSave)
         let onDisk = try String(contentsOf: vaultURL.appendingPathComponent("index.html"), encoding: .utf8)
         XCTAssertEqual(onDisk, full)  // head/title/doctype preserved (via the DOM), not dropped
     }
@@ -219,7 +231,8 @@ final class EditorSessionTests: XCTestCase {
         let source = "<html><head><title>Home</title></head><body><p>a</p></body></html>"
         let (appState, _) = try await openedVault(files: ["index.html": source])
         let document = try XCTUnwrap(appState.index?.document(id: "index.html"))
-        XCTAssertTrue(appState.beginEditing(document))
+        let didBegin = await appState.beginEditing(document)
+        XCTAssertTrue(didBegin)
         appState.beginVisualSession()
 
         appState.updateVisualEditedDocument(documentId: "stale-other.html", bodyInnerHTML: "<p>WRONG</p>", fullHTML: nil)
@@ -234,13 +247,15 @@ final class EditorSessionTests: XCTestCase {
         let source = "<html><head><title>Home</title></head><body><p>a</p></body></html>"
         let (appState, _) = try await openedVault(files: ["index.html": source])
         let document = try XCTUnwrap(appState.index?.document(id: "index.html"))
-        XCTAssertTrue(appState.beginEditing(document))
+        let didBeginVisual = await appState.beginEditing(document)
+        XCTAssertTrue(didBeginVisual)
         appState.beginVisualSession()
 
         // Simulate leaving the visual surface (e.g. switching to source) — endEditing then a
         // fresh begin, without a new visual session.
         appState.endEditing()
-        XCTAssertTrue(appState.beginEditing(document))
+        let didReBegin = await appState.beginEditing(document)
+        XCTAssertTrue(didReBegin)
 
         // A stale snapshot from the dismantling visual editor is dropped, not applied.
         appState.updateVisualEditedDocument(documentId: "index.html", bodyInnerHTML: "<p>STALE</p>", fullHTML: nil)
@@ -254,7 +269,8 @@ final class EditorSessionTests: XCTestCase {
         let original = "<html><head><title>Home</title></head><body></body></html>"
         let (appState, vaultURL) = try await openedVault(files: ["index.html": original])
         let document = try XCTUnwrap(appState.index?.document(id: "index.html"))
-        XCTAssertTrue(appState.beginEditing(document))
+        let didBegin = await appState.beginEditing(document)
+        XCTAssertTrue(didBegin)
 
         appState.updateEditorText("<html><body>mine</body></html>")
 
@@ -262,7 +278,8 @@ final class EditorSessionTests: XCTestCase {
         let theirs = "<html><body>theirs</body></html>"
         try theirs.write(to: vaultURL.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
 
-        XCTAssertFalse(appState.saveEditorBuffer())
+        let didSave = await appState.saveEditorBuffer()
+        XCTAssertFalse(didSave)
 
         let conflict = try XCTUnwrap(appState.editorConflict)
         XCTAssertEqual(conflict.documentId, "index.html")
@@ -279,15 +296,17 @@ final class EditorSessionTests: XCTestCase {
             "index.html": "<html><head><title>Home</title></head><body></body></html>"
         ])
         let document = try XCTUnwrap(appState.index?.document(id: "index.html"))
-        XCTAssertTrue(appState.beginEditing(document))
+        let didBegin = await appState.beginEditing(document)
+        XCTAssertTrue(didBegin)
         appState.updateEditorText("<html><body>mine</body></html>")
         try "<html><body>theirs</body></html>".write(
             to: vaultURL.appendingPathComponent("index.html"), atomically: true, encoding: .utf8
         )
-        XCTAssertFalse(appState.saveEditorBuffer())
+        let didSave = await appState.saveEditorBuffer()
+        XCTAssertFalse(didSave)
         XCTAssertNotNil(appState.editorConflict)
 
-        appState.resolveConflictByOverwriting()
+        await appState.resolveConflictByOverwriting()
 
         let onDisk = try String(contentsOf: vaultURL.appendingPathComponent("index.html"), encoding: .utf8)
         XCTAssertEqual(onDisk, "<html><body>mine</body></html>")
@@ -300,11 +319,13 @@ final class EditorSessionTests: XCTestCase {
             "index.html": "<html><head><title>Home</title></head><body></body></html>"
         ])
         let document = try XCTUnwrap(appState.index?.document(id: "index.html"))
-        XCTAssertTrue(appState.beginEditing(document))
+        let didBegin = await appState.beginEditing(document)
+        XCTAssertTrue(didBegin)
         appState.updateEditorText("<html><body>mine</body></html>")
         let theirs = "<html><body>theirs</body></html>"
         try theirs.write(to: vaultURL.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
-        XCTAssertFalse(appState.saveEditorBuffer())
+        let didSave = await appState.saveEditorBuffer()
+        XCTAssertFalse(didSave)
         XCTAssertNotNil(appState.editorConflict)
 
         appState.resolveConflictByReloading()

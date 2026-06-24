@@ -73,8 +73,8 @@ public struct VaultIndexer {
     public func reindexDocument(
         _ existing: VaultIndex,
         changedRelativePath: String,
-        vaultURL: URL
-    ) throws -> VaultIndex {
+        fileSystem: VaultFileSystem
+    ) async throws -> VaultIndex {
         // The file set is constant for an in-place edit, so the known-id set — which
         // drives link resolution — is exactly the existing documents' ids.
         let knownIds = Set(existing.documents.map(\.id))
@@ -82,20 +82,16 @@ public struct VaultIndexer {
             throw IncrementalReindexError.unknownDocument(changedRelativePath)
         }
 
-        let fileURL = vaultURL.appendingPathComponent(changedRelativePath)
-        let html = try String(contentsOf: fileURL, encoding: .utf8)
-        let lastModified = (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        let html = try await fileSystem.readText(at: changedRelativePath)
+        let lastModified = (try? await fileSystem.metadata(at: changedRelativePath).modificationDate) ?? .distantPast
+        // An in-place edit doesn't move the file, so `absolutePath` is invariant — preserve
+        // the existing node's value (it's discarded into `newNode` below anyway).
         let recomputed = try documentNode(
             relative: changedRelativePath,
             html: html,
-            absolutePath: fileURL.path,
+            absolutePath: existingNode.absolutePath,
             lastModified: lastModified
         )
-        // An in-place edit doesn't move the file, so `absolutePath` is invariant. Preserve
-        // the existing node's value rather than the one derived from the freshly built
-        // `fileURL` — `indexVault`'s enumerator yields symlink-resolved paths
-        // (/private/var/…) that a re-derived URL (/var/…) wouldn't match, which would
-        // otherwise diverge from a full reindex.
         let newNode = DocumentNode(
             id: recomputed.id,
             path: recomputed.path,
@@ -129,6 +125,11 @@ public struct VaultIndexer {
             unresolvedLinks: unresolvedLinks(from: edges),
             lastIndexedAt: Date()
         )
+    }
+
+    /// Convenience: incremental reindex against a local vault directory.
+    public func reindexDocument(_ existing: VaultIndex, changedRelativePath: String, vaultURL: URL) async throws -> VaultIndex {
+        try await reindexDocument(existing, changedRelativePath: changedRelativePath, fileSystem: LocalFileSystem(root: vaultURL))
     }
 
     // MARK: - Shared building blocks (used by both full and incremental indexing)

@@ -152,7 +152,7 @@ struct ReaderPane: View {
                         Button("Save") {
                             Task {
                                 if editorMode == .visual { await visualBridge.flush() }
-                                appState.saveEditorBuffer()
+                                await appState.saveEditorBuffer()
                             }
                         }
                         .keyboardShortcut("s", modifiers: .command)
@@ -220,7 +220,7 @@ struct ReaderPane: View {
                 set: { if !$0 { appState.dismissConflict() } }
             )
         ) {
-            Button("Overwrite", role: .destructive) { appState.resolveConflictByOverwriting() }
+            Button("Overwrite", role: .destructive) { Task { await appState.resolveConflictByOverwriting() } }
             Button("Reload") { appState.resolveConflictByReloading() }
             Button("Cancel", role: .cancel) { appState.dismissConflict() }
         } message: {
@@ -315,7 +315,7 @@ struct ReaderPane: View {
         if editorMode == .visual {
             await visualBridge.flush()
         }
-        if editorMode.isEditing, appState.hasUnsavedEdits, !EditorGuard.confirmLeavingEditor(appState) {
+        if editorMode.isEditing, appState.hasUnsavedEdits, !(await EditorGuard.confirmLeavingEditor(appState)) {
             // Cancelled, or a conflict that must be resolved first — stay put.
             return
         }
@@ -327,7 +327,7 @@ struct ReaderPane: View {
             // Re-baseline from disk when entering (or swapping into) an edit surface so it
             // loads the just-saved / just-discarded bytes rather than a stale buffer.
             appState.endEditing()
-            if appState.beginEditing(document) {
+            if await appState.beginEditing(document) {
                 if target == .visual { appState.beginVisualSession() }
                 editorMode = target
             } else {
@@ -420,14 +420,16 @@ struct ReaderPane: View {
         }
 
         func resolveLeaveForSelectionChange(from oldValue: SidebarSelection?) {
-            if appState.hasUnsavedEdits, !EditorGuard.confirmLeavingEditor(appState) {
-                // Cancelled or unresolved conflict — put the selection back where it was.
-                isRevertingSelection = true
-                appState.sidebarSelection = oldValue
-                return
+            Task {
+                if appState.hasUnsavedEdits, !(await EditorGuard.confirmLeavingEditor(appState)) {
+                    // Cancelled or unresolved conflict — put the selection back where it was.
+                    isRevertingSelection = true
+                    appState.sidebarSelection = oldValue
+                    return
+                }
+                appState.endEditing()
+                editorMode = .read
             }
-            appState.endEditing()
-            editorMode = .read
         }
     }
 
@@ -606,7 +608,7 @@ struct ReaderPane: View {
         preferredEditorBundleID = editor.bundleID
         Task {
             if editorMode == .visual { await visualBridge.flush() }
-            if editorMode.isEditing, appState.hasUnsavedEdits, !EditorGuard.confirmLeavingEditor(appState) {
+            if editorMode.isEditing, appState.hasUnsavedEdits, !(await EditorGuard.confirmLeavingEditor(appState)) {
                 return
             }
             openWith(editor, absolutePath: absolutePath)

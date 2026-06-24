@@ -19,7 +19,7 @@ final class IncrementalReindexTests: XCTestCase {
         try write(page(title: "Home Renamed", body: #"<a href="./target.html">Target</a>"#),
                   to: "index.html", in: vaultURL)
 
-        let patched = try VaultIndexer().reindexDocument(initial, changedRelativePath: "index.html", vaultURL: vaultURL)
+        let patched = try await VaultIndexer().reindexDocument(initial, changedRelativePath: "index.html", vaultURL: vaultURL)
         let full = try await VaultIndexer().indexVault(at: vaultURL)
 
         XCTAssertEqual(patched.document(id: "index.html")?.title, "Home Renamed")
@@ -40,7 +40,7 @@ final class IncrementalReindexTests: XCTestCase {
 
         try write(page(title: "B", body: #"<a href="./c.html">B to C</a>"#), to: "b.html", in: vaultURL)
 
-        let patched = try VaultIndexer().reindexDocument(initial, changedRelativePath: "b.html", vaultURL: vaultURL)
+        let patched = try await VaultIndexer().reindexDocument(initial, changedRelativePath: "b.html", vaultURL: vaultURL)
         let full = try await VaultIndexer().indexVault(at: vaultURL)
 
         // c.html now has two backlinks (a and b); the patched index must agree.
@@ -61,7 +61,7 @@ final class IncrementalReindexTests: XCTestCase {
         try write(page(title: "Home", body: #"<a href="./missing.html">Gone</a>"#),
                   to: "index.html", in: vaultURL)
 
-        let patched = try VaultIndexer().reindexDocument(initial, changedRelativePath: "index.html", vaultURL: vaultURL)
+        let patched = try await VaultIndexer().reindexDocument(initial, changedRelativePath: "index.html", vaultURL: vaultURL)
         let full = try await VaultIndexer().indexVault(at: vaultURL)
 
         XCTAssertNil(patched.backlinks["target.html"])
@@ -79,7 +79,7 @@ final class IncrementalReindexTests: XCTestCase {
 
         try write(page(title: "Home", body: ##"<a href="#section">Jump</a>"##), to: "index.html", in: vaultURL)
 
-        let patched = try VaultIndexer().reindexDocument(initial, changedRelativePath: "index.html", vaultURL: vaultURL)
+        let patched = try await VaultIndexer().reindexDocument(initial, changedRelativePath: "index.html", vaultURL: vaultURL)
         let full = try await VaultIndexer().indexVault(at: vaultURL)
 
         XCTAssertTrue(patched.edges.contains { $0.href == "#section" && $0.status == .sameDocument })
@@ -96,9 +96,10 @@ final class IncrementalReindexTests: XCTestCase {
 
         let initial = try await VaultIndexer().indexVault(at: vaultURL)
 
-        XCTAssertThrowsError(
-            try VaultIndexer().reindexDocument(initial, changedRelativePath: "does-not-exist.html", vaultURL: vaultURL)
-        ) { error in
+        do {
+            _ = try await VaultIndexer().reindexDocument(initial, changedRelativePath: "does-not-exist.html", vaultURL: vaultURL)
+            XCTFail("expected unknownDocument")
+        } catch {
             XCTAssertEqual(error as? IncrementalReindexError, .unknownDocument("does-not-exist.html"))
         }
     }

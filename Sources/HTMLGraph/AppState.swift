@@ -1145,20 +1145,22 @@ final class AppState: ObservableObject {
     /// (not the index's cached title) so the editor always reflects the bytes on disk.
     /// Returns false if the document can't be read or lies outside the vault.
     @discardableResult
-    func beginEditing(_ document: DocumentNode) -> Bool {
+    func beginEditing(_ document: DocumentNode) async -> Bool {
         guard let vaultURL else { return false }
-        guard let fileURL = editorFileURL(for: document.id, vaultURL: vaultURL) else {
+        guard let relativePath = editorRelativePath(for: document.id) else {
             errorMessage = "Cannot edit a document outside the selected vault."
             return false
         }
+        let fileSystem = LocalFileSystem(root: vaultURL)
         do {
-            let text = try String(contentsOf: fileURL, encoding: .utf8)
+            let text = try await fileSystem.readText(at: relativePath)
+            let mtime = (try? await fileSystem.metadata(at: relativePath).modificationDate) ?? .distantPast
             editorBuffer = EditorBuffer(
                 documentId: document.id,
                 baselineText: text,
                 currentText: text,
                 baselineHash: VaultIndexer.contentHash(forHTML: text),
-                baselineMTime: modificationDate(of: fileURL) ?? .distantPast
+                baselineMTime: mtime
             )
             editorConflict = nil
             return true
@@ -1239,43 +1241,47 @@ final class AppState: ObservableObject {
     /// false if there was nothing to save, the write failed, or the file changed on disk
     /// (which raises `editorConflict` instead of overwriting).
     @discardableResult
-    func saveEditorBuffer() -> Bool {
+    func saveEditorBuffer() async -> Bool {
         guard let buffer = editorBuffer, let vaultURL else { return false }
-        guard let fileURL = editorFileURL(for: buffer.documentId, vaultURL: vaultURL) else {
+        guard let relativePath = editorRelativePath(for: buffer.documentId) else {
             errorMessage = "Cannot save a document outside the selected vault."
             return false
         }
+        let fileSystem = LocalFileSystem(root: vaultURL)
 
         // Conflict pre-check: the file must still hash to the baseline we loaded. A
         // mismatch means it was changed under us (external editor, AI inbox tool, …).
-        guard let diskText = try? String(contentsOf: fileURL, encoding: .utf8) else {
+        guard let diskText = try? await fileSystem.readText(at: relativePath) else {
             errorMessage = "“\(buffer.documentId)” no longer exists on disk. It may have been moved or deleted."
             return false
         }
         let diskHash = VaultIndexer.contentHash(forHTML: diskText)
         if diskHash != buffer.baselineHash {
+            let diskMTime = (try? await fileSystem.metadata(at: relativePath).modificationDate) ?? Date()
             editorConflict = EditorConflict(
                 documentId: buffer.documentId,
                 pendingText: buffer.currentText,
                 diskText: diskText,
                 diskHash: diskHash,
-                diskMTime: modificationDate(of: fileURL) ?? Date()
+                diskMTime: diskMTime
             )
             return false
         }
 
-        return writeEditorText(buffer.currentText, to: fileURL, documentId: buffer.documentId)
+        return await writeEditorText(buffer.currentText, toRelativePath: relativePath, documentId: buffer.documentId, fileSystem: fileSystem)
     }
 
     /// Conflict resolution: write the user's unsaved text over the changed file.
-    func resolveConflictByOverwriting() {
+    func resolveConflictByOverwriting() async {
         guard let conflict = editorConflict, let vaultURL,
-              let fileURL = editorFileURL(for: conflict.documentId, vaultURL: vaultURL) else {
+              let relativePath = editorRelativePath(for: conflict.documentId) else {
             editorConflict = nil
             return
         }
         editorConflict = nil
-        _ = writeEditorText(conflict.pendingText, to: fileURL, documentId: conflict.documentId)
+        _ = await writeEditorText(
+            conflict.pendingText, toRelativePath: relativePath, documentId: conflict.documentId,
+            fileSystem: LocalFileSystem(root: vaultURL))
     }
 
     /// Conflict resolution: discard the user's unsaved text and reload the disk version
@@ -1304,10 +1310,10 @@ final class AppState: ObservableObject {
     /// Writes `text` atomically, then patches the index in place for just this document.
     /// Deliberately avoids `beginSession` so the selection, scroll, and editor survive.
     @discardableResult
-    private func writeEditorText(_ text: String, to fileURL: URL, documentId: String) -> Bool {
+    private func writeEditorText(_ text: String, toRelativePath relativePath: String, documentId: String, fileSystem: VaultFileSystem) async -> Bool {
         guard let vaultURL else { return false }
         do {
-            try text.write(to: fileURL, atomically: true, encoding: .utf8)
+            try await fileSystem.writeText(text, to: relativePath, options: [.atomic])
         } catch {
             errorMessage = error.localizedDescription
             return false
@@ -1319,19 +1325,18 @@ final class AppState: ObservableObject {
 
         if let index {
             do {
-                let patched = try VaultIndexer().reindexDocument(index, changedRelativePath: documentId, vaultURL: vaultURL)
+                let patched = try await VaultIndexer().reindexDocument(index, changedRelativePath: documentId, fileSystem: fileSystem)
                 self.index = patched
                 // Keep the AI sidecar current; a failure must not break the save.
                 Task {
                     do {
-                        try await VaultIndexExporter().export(patched, vaultURL: vaultURL)
+                        try await VaultIndexExporter().export(patched, fileSystem: fileSystem)
                     } catch {
                         Self.exportLogger.error("graph.json export failed: \(error.localizedDescription, privacy: .public)")
                     }
                 }
-                // Re-embed just this document, off-main, AFTER the synchronous reindex
-                // returned. Never gates save success (issue #6: the reindex itself stays
-                // synchronous; only the embedding is async and strictly downstream).
+                // Re-embed just this document, off-main, after the reindex returned. Never
+                // gates save success — only the embedding is async and strictly downstream.
                 refreshEmbedding(forDocumentId: documentId, in: patched, vaultURL: vaultURL)
             } catch {
                 // The write already succeeded, so no data is lost; only the in-memory
@@ -1340,28 +1345,30 @@ final class AppState: ObservableObject {
             }
         }
 
-        editorBuffer = EditorBuffer(
-            documentId: documentId,
-            baselineText: text,
-            currentText: text,
-            baselineHash: VaultIndexer.contentHash(forHTML: text),
-            baselineMTime: modificationDate(of: fileURL) ?? Date()
-        )
+        let mtime = (try? await fileSystem.metadata(at: relativePath).modificationDate) ?? Date()
+        // The write/reindex above suspended the main actor, so the user may have typed more
+        // into the SAME document during the await window. Adopt the written bytes as the new
+        // clean baseline, but KEEP the live `currentText` so those intervening edits aren't
+        // silently discarded (they stay dirty and save on the next ⌘S). Guard on documentId so
+        // a buffer re-baselined to a different document mid-await isn't clobbered.
+        if editorBuffer?.documentId == documentId {
+            editorBuffer = EditorBuffer(
+                documentId: documentId,
+                baselineText: text,
+                currentText: editorBuffer?.currentText ?? text,
+                baselineHash: VaultIndexer.contentHash(forHTML: text),
+                baselineMTime: mtime
+            )
+        }
         editorConflict = nil
         return true
     }
 
-    /// Resolves a document id to its on-disk URL, rejecting path escapes and anything
-    /// outside the vault (mirrors the loopback server's containment check).
-    private func editorFileURL(for id: String, vaultURL: URL) -> URL? {
+    /// Validates a document id as an editable vault-relative path, rejecting path escapes
+    /// (mirrors the loopback server's containment check). Returns the id when safe.
+    private func editorRelativePath(for id: String) -> String? {
         guard !id.split(separator: "/", omittingEmptySubsequences: false).contains("..") else { return nil }
-        let url = vaultURL.appendingPathComponent(id).standardizedFileURL
-        guard securityPolicy.allows(url, vaultRoot: vaultURL) else { return nil }
-        return url
-    }
-
-    private func modificationDate(of fileURL: URL) -> Date? {
-        try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        return id
     }
 
     /// Moves an unfiled inbox item to the Trash and refreshes the inbox.

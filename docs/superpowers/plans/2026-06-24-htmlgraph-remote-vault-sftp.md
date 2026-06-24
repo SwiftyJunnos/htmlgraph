@@ -1,6 +1,6 @@
 # Remote Vault over SSH — In-app SFTP filesystem layer
 
-Status: M5 done — file-op mutations + inbox accept async. Next: M6 (editor save path).
+Status: M6 done — editor save path async. Next: M7 (preview servers + UI gating).
 Started: 2026-06-24
 Owner: Junnos
 
@@ -160,13 +160,23 @@ Operations the protocol must cover, by call site:
   Note: `LocalFileSystem.trash` still uses `FileManager.trashItem`; the remote-Trash fallback
   lands with the SFTP backend (M9). Verified: `swift test` (132) + `xcodebuild`.
 
-- **M6 — Editor save path.**
-  `VaultIndexer.reindexDocument` → `async` over the FS; `AppState.beginEditing` /
-  `saveEditorBuffer` / `writeEditorText` / conflict resolution + `editorFileURL` /
-  `modificationDate` through the FS. `saveEditorBuffer() -> Bool` becomes `async`, so its
-  callers (ReaderPane ⌘S, `EditorGuard` in EditorSession) and `beginEditing` (whose `Bool` the
-  reader uses in an `if`) must thread `await`/`Task`. Content-hash conflict detection ports
-  unchanged.
+- **M6 — Editor save path. ✅ DONE (2026-06-24).**
+  `VaultIndexer.reindexDocument(_:changedRelativePath:fileSystem:) async` (+ `vaultURL:`
+  convenience); `AppState.beginEditing` / `saveEditorBuffer` / `writeEditorText` /
+  `resolveConflictByOverwriting` are `async` over the FS; `editorFileURL`+`modificationDate(of:)`
+  replaced by `editorRelativePath` + `fileSystem.metadata` (mtime). `EditorGuard.confirmLeavingEditor`
+  is `async`; all **17 call sites** restructured: the sync `applicationShouldTerminate` quit
+  guard uses `.terminateLater` + `reply(toApplicationShouldTerminate:)` (fast-path terminateNow
+  when nothing unsaved); ReaderPane setMode/selection/external-editor guards `await` in their
+  (already async) Tasks; HTMLGraphApp menus, ContextPane, ContentView, VaultSidebar
+  `SidebarActions` wrap body in `Task { guard await … }`. Content-hash conflict detection ports
+  unchanged. **Adversarial review (workflow) found + fixed a re-entrancy data-loss blocker**:
+  the pre-M6 save was a synchronous atomic critical section; the async awaits opened a window
+  where a keystroke during the write/reindex was discarded by the final `editorBuffer` reset —
+  fixed by reconciling on completion (baseline = written bytes, keep live `currentText`, guarded
+  by `documentId`). Verified: `swift test` (132) + `xcodebuild`. Remaining local-isms (deferred
+  to M10): `directoryExists` in `openRecent` (bookmark path) and `finishIndexing`'s
+  pendingEmptyFolders pruning still use `FileManager`.
 
 - **M7 — Migrate the preview servers + UI gating.**
   `VaultHTTPServer` responder and `VaultResourceSchemeHandler` read through the FS (range
