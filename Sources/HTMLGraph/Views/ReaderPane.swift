@@ -89,9 +89,14 @@ struct ReaderPane: View {
                                 }
                             }
                         }
-                        Divider()
-                        Button("Choose Folder…") {
-                            onAcceptInboxItem(item)
+                        // "Choose Folder…" opens a local folder picker scoped to the vault, which
+                        // a remote vault has no local path for — remote users file via the folder
+                        // list above (Add to Vault → folder), which works over SFTP.
+                        if !appState.isRemoteVault {
+                            Divider()
+                            Button("Choose Folder…") {
+                                onAcceptInboxItem(item)
+                            }
                         }
                     } primaryAction: {
                         SidebarActions.addToVault(item, folder: nil, appState: appState)

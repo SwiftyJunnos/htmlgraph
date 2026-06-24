@@ -633,10 +633,17 @@ final class AppState: ObservableObject {
         let isDifferentVault = (vaultFileSystem?.vaultIdentity)?
             .caseInsensitiveCompare(identity) != .orderedSame
 
-        // Tear down a previous REMOTE connection when actually switching vaults, so SSH
-        // sessions don't leak across opens. Same-vault reindexes reuse the live connection.
-        if isDifferentVault, let previousRemote = vaultFileSystem as? SFTPFileSystem {
-            Task { await previousRemote.disconnect() }
+        // Tear down a previous REMOTE connection when it's being REPLACED — switching to a local
+        // vault, a different remote, or even a fresh connection to the SAME host (reopening from
+        // Recent builds a new SFTPFileSystem). A same-instance reindex (`reindexCurrentVault`
+        // passes the live file system) shares the connection and must keep it, so gate on
+        // connection identity rather than vault identity.
+        if let previousRemote = vaultFileSystem as? SFTPFileSystem {
+            let reusesConnection = (fileSystem as? SFTPFileSystem)
+                .map { previousRemote.sharesConnection(with: $0) } ?? false
+            if !reusesConnection {
+                Task { await previousRemote.disconnect() }
+            }
         }
 
         indexingTask?.cancel()
@@ -812,8 +819,12 @@ final class AppState: ObservableObject {
             }
             pendingSelectionId = nil
             if let fileSystem = vaultFileSystem {
-                Task {
-                    if let scanned = try? await InboxScanner().scanInbox(fileSystem: fileSystem) {
+                Task { [generation] in
+                    // The scan is async; a vault switch during it bumps `indexingGeneration`, so
+                    // recheck before publishing or a slow remote scan could overwrite the new
+                    // vault's inbox with the previous vault's items.
+                    if let scanned = try? await InboxScanner().scanInbox(fileSystem: fileSystem),
+                       generation == indexingGeneration {
                         inboxItems = scanned
                     }
                 }

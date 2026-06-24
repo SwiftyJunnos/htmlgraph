@@ -318,40 +318,44 @@ new test files need no `project.pbxproj` entry — but every new **source** file
 
 ## Code review findings (2026-06-24, max-effort multi-agent review of main...HEAD)
 
-✅ **Fixed (commit 0911c6c):**
+✅ **Fixed — round 1 (commit 0911c6c):**
 - LocalFileSystem.resolve dropped symlink-resolved containment → restored at that single
   chokepoint (covers loopback server + editor + indexer).
 - writeEditorText had no in-flight guard → serialized on a Task chain (no concurrent writes).
 - SFTPFileSystem.readRange issued one SFTP READ (truncates large ranges → 500) → now loops to EOF.
 
-⏳ **Open findings (verified, not yet fixed) — most remote-only:**
-- **SFTP atomic write data-loss window** (SFTPFileSystem.swift writeData .atomic): removes target
-  before rename; a drop between the two loses the original. Fix: rename original to backup → rename
-  temp in → delete backup. Affects editor save + graph.json/embeddings export on remote.
-- **SFTP backend doesn't reject `..`** (remotePath join): violates the VaultFileSystem containment
-  contract LocalFileSystem honors; only masked by callers' pre-filters. Add a `..` guard (+ ideally
-  a realpath-under-root check) in SFTPFileSystem.
-- **SFTPConnection.client() concurrent first-use** opens two SSH connections (TOCTOU across the
-  connect await). Cache an in-flight connect Task in the actor.
-- **Reopening the SAME remote vault leaks the previous SSH session** (beginSession only disconnects
-  when isDifferentVault; a fresh SFTPFileSystem for the same identity skips it). Disconnect the
-  previous instance whenever it's a different *instance*, or dedupe by identity before recreating.
-- **isRegularFile/isDirectory default to file** when the server omits permission bits → directories
-  enumerated as documents and never recursed. Fall back to the SFTP file-type, or stat explicitly.
-- **enumerateFiles swallows a per-directory listing failure** (`try? … else continue`) → silently
-  drops a whole subtree from index/inbox. Surface the error (or at least log + count).
-- **Full-file responder `full.count == size`** 500s when an SFTP server omits the size attribute
-  (VaultFileMetadata.size defaults to 0). Treat size==0/unknown as "don't length-check".
+✅ **Fixed — round 2:**
+- **SFTP atomic write data-loss window** → swap now moves the original aside to a `.htmlgraph-bak-*`
+  before renaming the temp in, restoring it on failure (original never deleted before the
+  replacement is in place).
+- **SFTP backend doesn't reject `..`** → `remotePath` is now throwing and rejects `..` with
+  `outsideVault` (mirrors LocalFileSystem.resolve).
+- **SFTPConnection.client() concurrent first-use** → an in-flight connect Task is cached in the
+  actor; concurrent callers join it instead of opening a second SSH session.
+- **Reopening the SAME remote vault leaks the previous SSH session** → beginSession now gates the
+  previous-connection teardown on connection IDENTITY (`SFTPFileSystem.sharesConnection`), so a
+  reopen (new instance) disconnects the old while an in-place reindex (same instance) keeps it.
+- **isRegularFile/isDirectory default to file** → enumeration falls back to the listing's `ls -l`
+  `longname` type char when permission bits are absent (metadata's serve-friendly default kept).
+- **enumerateFiles swallows a per-directory listing failure** → only the top-level subpath being
+  absent yields []; a failure listing an already-descended directory now propagates.
+- **Full-file responder `full.count == size`** → Content-Length now reflects the bytes actually read
+  (readData reads to EOF), so a size-omitting SFTP server no longer 500s a good file.
+- **Inbox "Choose Folder…" dead no-op on remote** → hidden for remote (uses a local folder picker);
+  remote users file via the Add-to-Vault folder list, which works over SFTP.
+- **finishIndexing inbox re-scan Task has no generation guard** → rechecks `indexingGeneration`
+  before publishing, so a vault switch mid-scan can't overwrite the new inbox with the old.
+
+⏳ **Still open (deferred):**
 - **Save conflict TOCTOU** (saveEditorBuffer): baseline read + write separated by a network
-  round-trip widens the window where an external change is silently overwritten.
-- **Inbox "Choose Folder…" is a dead no-op on remote** (acceptInboxItem still guards `vaultURL`).
-  Either support a remote destination picker or hide the action for remote.
-- **Inbox poll re-reads every inbox file's full contents every 2s over SFTP**; **every file mutation
-  triggers a full reindex (server restart + whole-vault re-enumerate/re-read) over SFTP**; first
-  open reads each doc twice (index + embedding). Remote-cost hot paths — add change detection /
-  incremental reindex / remote backoff.
-- **finishIndexing inbox re-scan Task has no generation guard** → a vault switch mid-scan can
-  overwrite the new vault's inbox with the old.
-- Cleanup (cut from top-15): duplicated `vaultRelativePath`/`isHTML`/`isInboxPath` helpers,
-  near-identical removeRecent/dropRecent, repeated open/close boilerplate in SFTPFileSystem,
+  round-trip widens the window where an external change is silently overwritten. (PLAUSIBLE.)
+- **Remote-cost hot paths** (efficiency, bigger refactor): inbox poll re-reads every inbox file's
+  full contents every 2s over SFTP; every file mutation triggers a full reindex (server restart +
+  whole-vault re-enumerate/re-read) over SFTP; first open reads each doc twice (index + embedding).
+  Want change detection / incremental reindex / remote backoff.
+- **SFTP error-type fidelity**: `contentsOfDirectory` throws the raw Citadel error (not
+  `notFound`) for a missing dir; `remove` uses `rmdir` (fails on a non-empty dir vs
+  FileManager's recursive delete). Need SFTP status-code matching / recursive remote delete.
+- Cleanup: duplicated `vaultRelativePath`/`isHTML`/`isInboxPath` helpers, near-identical
+  removeRecent/dropRecent, repeated open/close boilerplate in SFTPFileSystem,
   previewVaultURL/previewFileURL re-encoding the same rule.

@@ -49,24 +49,42 @@ public struct SFTPFileSystem: VaultFileSystem {
         await connection.disconnect()
     }
 
+    /// Whether this and `other` drive the SAME underlying connection (the same value), as opposed
+    /// to a fresh instance pointed at the same host. Lets the session layer keep the connection on
+    /// an in-place reindex but tear down a replaced one when a vault is reopened.
+    public func sharesConnection(with other: SFTPFileSystem) -> Bool {
+        connection === other.connection
+    }
+
     // MARK: - Enumeration
 
     public func enumerateFiles(under subpath: String) async throws -> [VaultFileEntry] {
         let client = try await connection.client()
         var entries: [VaultFileEntry] = []
         var stack = [trim(subpath)]
+        var isFirst = true
         while let dir = stack.popLast() {
-            // A missing directory yields nothing (matches LocalFileSystem's nil-enumerator).
-            guard let listing = try? await client.listDirectory(atPath: remotePath(dir)) else { continue }
-            for component in listing.flatMap(\.components) {
+            let names: [SFTPMessage.Name]
+            do {
+                names = try await client.listDirectory(atPath: remotePath(dir))
+            } catch {
+                // The top-level subpath being absent yields an empty result (matches
+                // LocalFileSystem's nil-enumerator). But a directory we already descended into
+                // failing to list is a real error — surface it rather than silently dropping the
+                // whole subtree from the index/inbox.
+                if isFirst { isFirst = false; continue }
+                throw error
+            }
+            isFirst = false
+            for component in names.flatMap(\.components) {
                 let name = component.filename
                 // Skip "." / ".." and hidden entries (mirrors `.skipsHiddenFiles`).
                 if name == "." || name == ".." || name.hasPrefix(".") { continue }
                 let relative = dir.isEmpty ? name : "\(dir)/\(name)"
                 let attributes = component.attributes
-                if Self.isDirectory(attributes) {
+                if Self.isDirectory(attributes, longname: component.longname) {
                     stack.append(relative)
-                } else if Self.isRegularFile(attributes) {
+                } else if Self.isRegularFile(attributes, longname: component.longname) {
                     entries.append(VaultFileEntry(
                         relativePath: relative,
                         size: Int(attributes.size ?? 0),
@@ -151,7 +169,7 @@ public struct SFTPFileSystem: VaultFileSystem {
 
     public func writeData(_ data: Data, to relativePath: String, options: VaultWriteOptions) async throws {
         let client = try await connection.client()
-        let target = remotePath(relativePath)
+        let target = try remotePath(relativePath)
 
         if options.contains(.withoutOverwriting),
            (try? await client.getAttributes(at: target)) != nil {
@@ -163,7 +181,9 @@ public struct SFTPFileSystem: VaultFileSystem {
 
         if options.contains(.atomic) {
             // Write to a sibling temp file, then swap it into place. Plain SFTP rename can't
-            // overwrite, so remove the target first (small non-atomic window — hardening TODO).
+            // overwrite, so the swap moves the original ASIDE to a backup first — never deleting
+            // it before the replacement is in place — so a failure/disconnect mid-swap leaves the
+            // original recoverable as a `.htmlgraph-bak-*` sibling instead of destroying it.
             let temp = target + ".htmlgraph-tmp-\(UUID().uuidString)"
             let file = try await client.openFile(filePath: temp, flags: [.write, .create, .truncate])
             do {
@@ -174,8 +194,21 @@ public struct SFTPFileSystem: VaultFileSystem {
                 try? await client.remove(at: temp)
                 throw error
             }
-            try? await client.remove(at: target)
-            try await client.rename(at: temp, to: target)
+
+            let backup = target + ".htmlgraph-bak-\(UUID().uuidString)"
+            let hadOriginal = (try? await client.getAttributes(at: target)) != nil
+            if hadOriginal {
+                try await client.rename(at: target, to: backup)
+            }
+            do {
+                try await client.rename(at: temp, to: target)
+            } catch {
+                // Put the original back so the write is all-or-nothing, then clean up the temp.
+                if hadOriginal { try? await client.rename(at: backup, to: target) }
+                try? await client.remove(at: temp)
+                throw error
+            }
+            if hadOriginal { try? await client.remove(at: backup) }
         } else {
             let file = try await client.openFile(filePath: target, flags: [.write, .create, .truncate])
             do {
@@ -196,7 +229,7 @@ public struct SFTPFileSystem: VaultFileSystem {
         var partial = ""
         for component in trim(relativePath).split(separator: "/").map(String.init) {
             partial = partial.isEmpty ? component : "\(partial)/\(component)"
-            let full = remotePath(partial)
+            let full = try remotePath(partial)
             if (try? await client.getAttributes(at: full)) != nil { continue }
             try? await client.createDirectory(atPath: full)
         }
@@ -229,7 +262,7 @@ public struct SFTPFileSystem: VaultFileSystem {
 
     public func remove(at relativePath: String) async throws {
         let client = try await connection.client()
-        let full = remotePath(relativePath)
+        let full = try remotePath(relativePath)
         if let attributes = try? await client.getAttributes(at: full), Self.isDirectory(attributes) {
             try await client.rmdir(at: full)
         } else {
@@ -243,10 +276,18 @@ public struct SFTPFileSystem: VaultFileSystem {
         relativePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
-    /// Joins a vault-relative path under the remote root.
-    private func remotePath(_ relativePath: String) -> String {
-        let relative = trim(relativePath)
-        return relative.isEmpty ? root : "\(root)/\(relative)"
+    /// Joins a vault-relative path under the remote root, rejecting any `..` escape with
+    /// `outsideVault`. Containment is part of the `VaultFileSystem` contract every backend must
+    /// uphold (mirrors `LocalFileSystem.resolve`); without it the server's path resolution would
+    /// follow `..` outside the vault root.
+    private func remotePath(_ relativePath: String) throws -> String {
+        let components = relativePath
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map(String.init)
+        guard !components.contains("..") else {
+            throw VaultFileSystemError.outsideVault(relativePath)
+        }
+        return components.isEmpty ? root : "\(root)/\(components.joined(separator: "/"))"
     }
 
     private static func normalizeRoot(_ path: String) -> String {
@@ -256,15 +297,20 @@ public struct SFTPFileSystem: VaultFileSystem {
     }
 
     /// POSIX mode-bit checks against `S_IFMT` (0o170000): directory (0o040000), regular file
-    /// (0o100000). When the server omits permissions, assume a regular file (not a directory).
-    private static func isDirectory(_ attributes: SFTPFileAttributes) -> Bool {
-        guard let mode = attributes.permissions else { return false }
-        return (mode & 0o170000) == 0o040000
+    /// (0o100000). Some servers omit permissions from a directory listing; in that case fall back
+    /// to the `ls -l`-style `longname`'s leading type char ('d' = directory, '-' = regular file)
+    /// so directories aren't misclassified as files and skipped during recursion.
+    private static func isDirectory(_ attributes: SFTPFileAttributes, longname: String? = nil) -> Bool {
+        if let mode = attributes.permissions { return (mode & 0o170000) == 0o040000 }
+        return longname?.first == "d"
     }
 
-    private static func isRegularFile(_ attributes: SFTPFileAttributes) -> Bool {
-        guard let mode = attributes.permissions else { return true }
-        return (mode & 0o170000) == 0o100000
+    private static func isRegularFile(_ attributes: SFTPFileAttributes, longname: String? = nil) -> Bool {
+        if let mode = attributes.permissions { return (mode & 0o170000) == 0o100000 }
+        // From a listing the longname disambiguates; from a bare stat (no longname) assume a
+        // regular file so reads/serving still work.
+        if let longname { return longname.first == "-" }
+        return true
     }
 }
 
@@ -277,6 +323,9 @@ actor SFTPConnection {
     private let credential: SFTPCredential
     private var sshClient: SSHClient?
     private var sftpClient: SFTPClient?
+    /// The in-flight connect, so concurrent first-use callers join one connect instead of each
+    /// opening (and leaking) a separate SSH session.
+    private var connectTask: Task<SFTPClient, Error>?
 
     init(host: String, port: Int, username: String, credential: SFTPCredential) {
         self.host = host
@@ -287,7 +336,20 @@ actor SFTPConnection {
 
     func client() async throws -> SFTPClient {
         if let sftpClient, sftpClient.isActive { return sftpClient }
+        // A connect already running (a concurrent caller suspended inside `connect()`): await it
+        // rather than starting a second one. Actor reentrancy means the second caller observes
+        // this non-nil before the first resumes.
+        if let connectTask { return try await connectTask.value }
 
+        let task = Task { try await self.connect() }
+        connectTask = task
+        defer { connectTask = nil }
+        let sftp = try await task.value
+        sftpClient = sftp
+        return sftp
+    }
+
+    private func connect() async throws -> SFTPClient {
         let authentication: SSHAuthenticationMethod
         switch credential {
         case .password(let password):
@@ -303,7 +365,6 @@ actor SFTPConnection {
         )
         let sftp = try await ssh.openSFTP()
         self.sshClient = ssh
-        self.sftpClient = sftp
         return sftp
     }
 
@@ -311,6 +372,8 @@ actor SFTPConnection {
         // SFTPClient is Sendable so it can be closed from here; SSHClient is not, so it's just
         // released (its NIO channel tears down on dealloc). Full, prompt SSH-session teardown is
         // a lifecycle/hardening TODO once AppState drives remote vault open/close.
+        connectTask?.cancel()
+        connectTask = nil
         try? await sftpClient?.close()
         sftpClient = nil
         sshClient = nil

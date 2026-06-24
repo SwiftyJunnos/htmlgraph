@@ -110,20 +110,24 @@ struct VaultHTTPResponder: Sendable {
 
         let body: Data
         if wantsBody {
-            guard let full = try? await fileSystem.readData(at: resolved), full.count == size else {
+            guard let full = try? await fileSystem.readData(at: resolved) else {
                 return Self.status(500, "Internal Server Error")
             }
             body = full
         } else {
             body = Data()
         }
+        // Content-Length is the bytes we actually read (`readData` reads to EOF). Some SFTP
+        // servers omit the size attribute (metadata reports 0), so trusting `size` here would
+        // wrongly 500 a perfectly good non-empty file; the read length is authoritative.
+        let contentLength = wantsBody ? body.count : size
         return Response(
             status: 200,
             reason: "OK",
             headers: [
                 .init("Content-Type", mime),
                 .init("Accept-Ranges", "bytes"),
-                .init("Content-Length", String(size)),
+                .init("Content-Length", String(contentLength)),
                 .init("Cache-Control", "no-store"),
             ],
             body: body
