@@ -32,9 +32,13 @@ public struct VaultEmbeddingStore: Sendable {
     public static let schemaVersion = 1
     public static let fileName = "embeddings.json"
 
+    /// Vault-relative location of the sidecar (`.htmlgraph/embeddings.json`) — the address
+    /// passed to a `VaultFileSystem`, reusing the graph sidecar directory.
+    public static let relativePath = "\(VaultIndexExporter.directoryName)/\(fileName)"
+
     public init() {}
 
-    /// `<vault>/.htmlgraph/embeddings.json` — reuses the graph sidecar directory.
+    /// `<vault>/.htmlgraph/embeddings.json` — the on-disk location for a local vault.
     public static func fileURL(forVault vaultURL: URL) -> URL {
         VaultIndexExporter.sidecarDirectory(forVault: vaultURL)
             .appendingPathComponent(fileName)
@@ -43,9 +47,8 @@ public struct VaultEmbeddingStore: Sendable {
     /// Loads persisted records for `(providerId, dimension)`. Returns `nil` when the
     /// file is absent, unreadable, or its `schemaVersion`/`providerId`/`dimension`
     /// don't match (⇒ caller rebuilds from scratch).
-    public func load(providerId: String, dimension: Int, vaultURL: URL) -> [String: EmbeddingRecord]? {
-        let url = Self.fileURL(forVault: vaultURL)
-        guard let data = try? Data(contentsOf: url),
+    public func load(providerId: String, dimension: Int, fileSystem: VaultFileSystem) async -> [String: EmbeddingRecord]? {
+        guard let data = try? await fileSystem.readData(at: Self.relativePath),
               let envelope = try? JSONDecoder().decode(Envelope.self, from: data) else {
             return nil
         }
@@ -68,16 +71,12 @@ public struct VaultEmbeddingStore: Sendable {
     }
 
     /// Atomically writes `records` to the sidecar.
-    @discardableResult
     public func save(
         _ records: [String: EmbeddingRecord],
         providerId: String,
         dimension: Int,
-        vaultURL: URL
-    ) throws -> URL {
-        let directory = VaultIndexExporter.sidecarDirectory(forVault: vaultURL)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-
+        fileSystem: VaultFileSystem
+    ) async throws {
         let entries = records.mapValues {
             Entry(contentHash: $0.contentHash, vector: Self.encodeVector($0.vector))
         }
@@ -91,9 +90,8 @@ public struct VaultEmbeddingStore: Sendable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(envelope)
 
-        let url = Self.fileURL(forVault: vaultURL)
-        try data.write(to: url, options: [.atomic])
-        return url
+        try await fileSystem.createDirectory(at: VaultIndexExporter.directoryName)
+        try await fileSystem.writeData(data, to: Self.relativePath, options: [.atomic])
     }
 
     // MARK: - Codable envelope

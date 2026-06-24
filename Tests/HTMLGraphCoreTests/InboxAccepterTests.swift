@@ -2,13 +2,14 @@ import XCTest
 @testable import HTMLGraphCore
 
 final class InboxAccepterTests: XCTestCase {
-    func testAcceptMovesInboxItemToChosenVaultPath() throws {
+    func testAcceptMovesInboxItemToChosenVaultPath() async throws {
         let vaultURL = try makeTemporaryVault(files: [
             "Inbox/idea.html": "<html><head><title>AI Idea</title></head><body></body></html>"
         ])
         defer { try? FileManager.default.removeItem(at: vaultURL) }
 
-        let item = try XCTUnwrap(try InboxScanner().scanInbox(at: vaultURL).first)
+        let scanned = try await InboxScanner().scanInbox(at: vaultURL)
+        let item = try XCTUnwrap(scanned.first)
         let destinationURL = vaultURL.appendingPathComponent("Notes/idea.html")
 
         let acceptedURL = try InboxAccepter().accept(item, to: destinationURL, vaultURL: vaultURL)
@@ -16,10 +17,11 @@ final class InboxAccepterTests: XCTestCase {
         XCTAssertEqual(acceptedURL.standardizedFileURL.path, destinationURL.standardizedFileURL.path)
         XCTAssertFalse(FileManager.default.fileExists(atPath: item.absolutePath))
         XCTAssertTrue(FileManager.default.fileExists(atPath: destinationURL.path))
-        XCTAssertEqual(try InboxScanner().scanInbox(at: vaultURL), [])
+        let remaining = try await InboxScanner().scanInbox(at: vaultURL)
+        XCTAssertEqual(remaining, [])
     }
 
-    func testAcceptRejectsDestinationOutsideVault() throws {
+    func testAcceptRejectsDestinationOutsideVault() async throws {
         let vaultURL = try makeTemporaryVault(files: [
             "Inbox/idea.html": "<html><head><title>AI Idea</title></head><body></body></html>"
         ])
@@ -30,7 +32,8 @@ final class InboxAccepterTests: XCTestCase {
             try? FileManager.default.removeItem(at: outsideURL)
         }
 
-        let item = try XCTUnwrap(try InboxScanner().scanInbox(at: vaultURL).first)
+        let scanned = try await InboxScanner().scanInbox(at: vaultURL)
+        let item = try XCTUnwrap(scanned.first)
 
         XCTAssertThrowsError(try InboxAccepter().accept(item, to: outsideURL, vaultURL: vaultURL)) { error in
             XCTAssertEqual(error as? InboxAcceptanceError, .destinationOutsideVault)
@@ -38,14 +41,15 @@ final class InboxAccepterTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: item.absolutePath))
     }
 
-    func testAcceptRejectsInboxDestinationAndExistingFile() throws {
+    func testAcceptRejectsInboxDestinationAndExistingFile() async throws {
         let vaultURL = try makeTemporaryVault(files: [
             "Inbox/idea.html": "<html><head><title>AI Idea</title></head><body></body></html>",
             "Notes/existing.html": "<html><head><title>Existing</title></head><body></body></html>"
         ])
         defer { try? FileManager.default.removeItem(at: vaultURL) }
 
-        let item = try XCTUnwrap(try InboxScanner().scanInbox(at: vaultURL).first)
+        let scanned = try await InboxScanner().scanInbox(at: vaultURL)
+        let item = try XCTUnwrap(scanned.first)
 
         XCTAssertThrowsError(try InboxAccepter().accept(
             item,

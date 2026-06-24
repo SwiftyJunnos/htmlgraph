@@ -54,23 +54,30 @@ public struct VaultAgentGuideWriter {
     /// files are handled independently, so a vault that already has, say, a hand-written
     /// `CLAUDE.md` still gets an `AGENTS.md`.
     @discardableResult
-    public func writeIfMissing(vaultURL: URL) throws -> Outcome {
+    public func writeIfMissing(fileSystem: VaultFileSystem) async throws -> Outcome {
         Outcome(
-            wroteAgents: try Self.createOnly(Self.agentsGuide, at: Self.agentsFileURL(forVault: vaultURL)),
-            wroteClaude: try Self.createOnly(Self.claudePointer, at: Self.claudeFileURL(forVault: vaultURL))
+            wroteAgents: try await Self.createOnly(Self.agentsGuide, at: Self.agentsFileName, fileSystem: fileSystem),
+            wroteClaude: try await Self.createOnly(Self.claudePointer, at: Self.claudeFileName, fileSystem: fileSystem)
         )
     }
 
-    /// Writes `contents` only when nothing exists at `url`; returns whether it created the
-    /// file. Uses `.withoutOverwriting` instead of a `fileExists` pre-check so the
-    /// create-only guarantee has no time-of-check/time-of-use race — the write itself
-    /// fails (leaving any existing file untouched) when a file is already there, which we
-    /// translate to "skipped". Other write errors propagate to the best-effort caller.
-    private static func createOnly(_ contents: String, at url: URL) throws -> Bool {
+    /// Convenience: create-only write into a local vault directory.
+    @discardableResult
+    public func writeIfMissing(vaultURL: URL) async throws -> Outcome {
+        try await writeIfMissing(fileSystem: LocalFileSystem(root: vaultURL))
+    }
+
+    /// Writes `contents` only when nothing exists at `relativePath`; returns whether it
+    /// created the file. Uses `.withoutOverwriting` instead of a `fileExists` pre-check so
+    /// the create-only guarantee has no time-of-check/time-of-use race — the write itself
+    /// fails (`alreadyExists`, leaving any existing file untouched) when a file is already
+    /// there, which we translate to "skipped". Other write errors propagate to the
+    /// best-effort caller.
+    private static func createOnly(_ contents: String, at relativePath: String, fileSystem: VaultFileSystem) async throws -> Bool {
         do {
-            try Data(contents.utf8).write(to: url, options: .withoutOverwriting)
+            try await fileSystem.writeData(Data(contents.utf8), to: relativePath, options: [.withoutOverwriting])
             return true
-        } catch let error as CocoaError where error.code == .fileWriteFileExists {
+        } catch VaultFileSystemError.alreadyExists {
             return false
         }
     }
@@ -78,12 +85,16 @@ public struct VaultAgentGuideWriter {
     /// Force-overwrites both guide files with the current templates — the "Regenerate"
     /// action. Destructive to manual edits, so the UI confirms before calling this.
     @discardableResult
-    public func regenerate(vaultURL: URL) throws -> Outcome {
-        try Self.agentsGuide.write(
-            to: Self.agentsFileURL(forVault: vaultURL), atomically: true, encoding: .utf8)
-        try Self.claudePointer.write(
-            to: Self.claudeFileURL(forVault: vaultURL), atomically: true, encoding: .utf8)
+    public func regenerate(fileSystem: VaultFileSystem) async throws -> Outcome {
+        try await fileSystem.writeText(Self.agentsGuide, to: Self.agentsFileName, options: [.atomic])
+        try await fileSystem.writeText(Self.claudePointer, to: Self.claudeFileName, options: [.atomic])
         return Outcome(wroteAgents: true, wroteClaude: true)
+    }
+
+    /// Convenience: regenerate in a local vault directory.
+    @discardableResult
+    public func regenerate(vaultURL: URL) async throws -> Outcome {
+        try await regenerate(fileSystem: LocalFileSystem(root: vaultURL))
     }
 
     // MARK: - Templates

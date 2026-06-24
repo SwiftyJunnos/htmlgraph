@@ -5,63 +5,43 @@ public struct InboxScanner {
     public static let inboxDirectoryName = "Inbox"
 
     private let extractor: HTMLMetadataExtractor
-    private let fileManager: FileManager
 
-    public init(
-        extractor: HTMLMetadataExtractor = HTMLMetadataExtractor(),
-        fileManager: FileManager = .default
-    ) {
+    public init(extractor: HTMLMetadataExtractor = HTMLMetadataExtractor()) {
         self.extractor = extractor
-        self.fileManager = fileManager
     }
 
-    public func scanInbox(at vaultURL: URL) throws -> [InboxItem] {
-        let inboxURL = vaultURL.appendingPathComponent(Self.inboxDirectoryName, isDirectory: true)
-        guard fileManager.fileExists(atPath: inboxURL.path) else {
-            return []
-        }
+    /// Scans the vault's `Inbox/` for unfiled HTML notes over `fileSystem`. Backend-agnostic:
+    /// the same logic runs against the local filesystem today and a remote backend later.
+    /// Returns items whose `id`/`path` are vault-relative (e.g. `Inbox/draft.html`).
+    public func scanInbox(fileSystem: VaultFileSystem) async throws -> [InboxItem] {
+        let entries = try await fileSystem.enumerateFiles(under: Self.inboxDirectoryName)
+            .filter { isHTML($0.relativePath) }
+            .sorted { $0.relativePath < $1.relativePath }
 
-        let fileURLs = try htmlFiles(in: inboxURL)
-            .sorted { relativePath(for: $0, in: vaultURL) < relativePath(for: $1, in: vaultURL) }
-
-        return try fileURLs.map { fileURL in
-            let html = try String(contentsOf: fileURL, encoding: .utf8)
-            let values = try fileURL.resourceValues(forKeys: [.contentModificationDateKey])
-            let relative = relativePath(for: fileURL, in: vaultURL)
-            return InboxItem(
-                id: relative,
-                path: relative,
-                absolutePath: fileURL.standardizedFileURL.path,
-                title: try extractor.title(from: html, fallbackFilename: fileURL.lastPathComponent),
+        var items: [InboxItem] = []
+        items.reserveCapacity(entries.count)
+        for entry in entries {
+            let html = try await fileSystem.readText(at: entry.relativePath)
+            items.append(InboxItem(
+                id: entry.relativePath,
+                path: entry.relativePath,
+                absolutePath: fileSystem.absolutePath(for: entry.relativePath) ?? "",
+                title: try extractor.title(from: html, fallbackFilename: (entry.relativePath as NSString).lastPathComponent),
                 contentHash: sha256(html),
-                lastModified: values.contentModificationDate ?? .distantPast
-            )
+                lastModified: entry.modificationDate
+            ))
         }
+        return items
     }
 
-    private func htmlFiles(in inboxURL: URL) throws -> [URL] {
-        let keys: Set<URLResourceKey> = [.isRegularFileKey]
-        let enumerator = fileManager.enumerator(
-            at: inboxURL,
-            includingPropertiesForKeys: Array(keys),
-            options: [.skipsHiddenFiles]
-        )
-        guard let enumerator else { return [] }
-
-        return try enumerator.compactMap { item in
-            guard let url = item as? URL else { return nil }
-            let values = try url.resourceValues(forKeys: keys)
-            guard values.isRegularFile == true else { return nil }
-            let ext = url.pathExtension.lowercased()
-            return (ext == "html" || ext == "htm") ? url : nil
-        }
+    /// Convenience: scan a local vault directory.
+    public func scanInbox(at vaultURL: URL) async throws -> [InboxItem] {
+        try await scanInbox(fileSystem: LocalFileSystem(root: vaultURL))
     }
 
-    private func relativePath(for fileURL: URL, in vaultURL: URL) -> String {
-        let base = vaultURL.standardizedFileURL.path
-        let full = fileURL.standardizedFileURL.path
-        return String(full.dropFirst(base.count))
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    private func isHTML(_ relativePath: String) -> Bool {
+        let ext = (relativePath as NSString).pathExtension.lowercased()
+        return ext == "html" || ext == "htm"
     }
 
     private func sha256(_ string: String) -> String {

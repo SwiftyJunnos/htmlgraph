@@ -546,18 +546,20 @@ final class AppState: ObservableObject {
                 self.previewServerFailed = (base == nil)
             }
         }
-        do {
-            try refreshInbox()
-        } catch {
-            inboxItems = []
-            errorMessage = error.localizedDescription
+        Task {
+            do {
+                try await refreshInbox()
+            } catch {
+                inboxItems = []
+                errorMessage = error.localizedDescription
+            }
         }
 
         indexingTask = Task { [weak self] in
             do {
                 let builtIndex = try await Task.detached(priority: .userInitiated) {
                     try Task.checkCancellation()
-                    let index = try VaultIndexer().indexVault(at: url)
+                    let index = try await VaultIndexer().indexVault(fileSystem: LocalFileSystem(root: url))
                     try Task.checkCancellation()
                     return index
                 }.value
@@ -635,19 +637,23 @@ final class AppState: ObservableObject {
                 // A write failure must never break indexing and must not touch
                 // errorMessage (cleared on success below) — just log it so a missing
                 // sidecar is diagnosable.
-                do {
-                    try VaultIndexExporter().export(builtIndex, vaultURL: vaultURL)
-                } catch {
-                    Self.exportLogger.error("graph.json export failed: \(error.localizedDescription, privacy: .public)")
+                Task {
+                    do {
+                        try await VaultIndexExporter().export(builtIndex, vaultURL: vaultURL)
+                    } catch {
+                        Self.exportLogger.error("graph.json export failed: \(error.localizedDescription, privacy: .public)")
+                    }
                 }
                 // Best-effort, create-only: drop AGENTS.md / CLAUDE.md at the vault root so
                 // AI coding agents that open this folder know it's an HTMLGraph vault and how
                 // to work in it. Never overwrites existing files (preserving user edits) and,
                 // like the graph export, never breaks indexing or touches errorMessage.
-                do {
-                    try VaultAgentGuideWriter().writeIfMissing(vaultURL: vaultURL)
-                } catch {
-                    Self.agentGuideLogger.error("agent guide write failed: \(error.localizedDescription, privacy: .public)")
+                Task {
+                    do {
+                        try await VaultAgentGuideWriter().writeIfMissing(vaultURL: vaultURL)
+                    } catch {
+                        Self.agentGuideLogger.error("agent guide write failed: \(error.localizedDescription, privacy: .public)")
+                    }
                 }
                 // Best-effort, off-main: refresh the on-device semantic index. Never
                 // blocks indexing (exactly like the graph.json export above).
@@ -660,7 +666,11 @@ final class AppState: ObservableObject {
             }
             pendingSelectionId = nil
             if let vaultURL {
-                inboxItems = (try? InboxScanner().scanInbox(at: vaultURL)) ?? inboxItems
+                Task {
+                    if let scanned = try? await InboxScanner().scanInbox(at: vaultURL) {
+                        inboxItems = scanned
+                    }
+                }
             }
             errorMessage = nil
         case .failure(let error):
@@ -682,20 +692,19 @@ final class AppState: ObservableObject {
 
     /// Force-rewrites the vault's `AGENTS.md` / `CLAUDE.md` from HTMLGraph's current
     /// template — the explicit counterpart to the create-only write that runs on open.
-    /// Overwrites any manual edits, so the UI confirms before calling this. Returns
-    /// `true` on success. Failures surface via `errorMessage` (a successful reindex
-    /// clears it, which is fine for a transient write error).
-    @discardableResult
-    func regenerateAgentGuide() -> Bool {
-        guard let vaultURL else { return false }
-        do {
-            try VaultAgentGuideWriter().regenerate(vaultURL: vaultURL)
-            Self.agentGuideLogger.info("regenerated agent guide for vault")
-            return true
-        } catch {
-            Self.agentGuideLogger.error("agent guide regenerate failed: \(error.localizedDescription, privacy: .public)")
-            errorMessage = "Couldn’t regenerate the agent guide: \(error.localizedDescription)"
-            return false
+    /// Overwrites any manual edits, so the UI confirms before calling this. Runs the write
+    /// off the main actor; failures surface via `errorMessage` (a successful reindex clears
+    /// it, which is fine for a transient write error).
+    func regenerateAgentGuide() {
+        guard let vaultURL else { return }
+        Task {
+            do {
+                try await VaultAgentGuideWriter().regenerate(vaultURL: vaultURL)
+                Self.agentGuideLogger.info("regenerated agent guide for vault")
+            } catch {
+                Self.agentGuideLogger.error("agent guide regenerate failed: \(error.localizedDescription, privacy: .public)")
+                errorMessage = "Couldn’t regenerate the agent guide: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -782,7 +791,7 @@ final class AppState: ObservableObject {
 
         Task(priority: .utility) { [weak self, indexer, index, vaultURL, generation] in
             do {
-                let result = try await indexer.refresh(index: index, vaultURL: vaultURL)
+                let result = try await indexer.refresh(index: index, fileSystem: LocalFileSystem(root: vaultURL))
                 guard let self, self.embeddingGeneration == generation else { return }
                 self.embeddingIndex = result
                 self.semanticIndexState = .ready
@@ -807,7 +816,7 @@ final class AppState: ObservableObject {
 
         Task(priority: .utility) { [weak self, indexer, document, documentId, vaultURL, generation] in
             do {
-                let record = try await indexer.embedRecord(for: document)
+                let record = try await indexer.embedRecord(for: document, fileSystem: LocalFileSystem(root: vaultURL))
                 guard let self, self.embeddingGeneration == generation,
                       var current = self.embeddingIndex else { return }
                 current.entries[documentId] = record
@@ -825,7 +834,12 @@ final class AppState: ObservableObject {
         let store = embeddingStore
         Task.detached(priority: .utility) {
             do {
-                try store.save(snapshot.entries, providerId: snapshot.providerId, dimension: snapshot.dimension, vaultURL: vaultURL)
+                try await store.save(
+                    snapshot.entries,
+                    providerId: snapshot.providerId,
+                    dimension: snapshot.dimension,
+                    fileSystem: LocalFileSystem(root: vaultURL)
+                )
             } catch {
                 Self.embeddingLogger.error("embedding persist failed: \(error.localizedDescription, privacy: .public)")
             }
@@ -848,14 +862,14 @@ final class AppState: ObservableObject {
         sidebarSelection = .inbox(id)
     }
 
-    func refreshInbox() throws {
+    func refreshInbox() async throws {
         guard let vaultURL else {
             inboxItems = []
             if case .inbox = sidebarSelection { sidebarSelection = nil }
             return
         }
 
-        inboxItems = try InboxScanner().scanInbox(at: vaultURL)
+        inboxItems = try await InboxScanner().scanInbox(at: vaultURL)
         if case let .inbox(id) = sidebarSelection,
            !inboxItems.contains(where: { $0.id == id }) {
             sidebarSelection = nil
@@ -866,7 +880,9 @@ final class AppState: ObservableObject {
         guard let vaultURL else { return }
 
         try InboxAccepter().accept(item, to: destinationURL, vaultURL: vaultURL)
-        try refreshInbox()
+        // The item was just moved out of Inbox; drop it from the in-memory list now (a full
+        // re-scan is async). openVault's reindex re-scans the inbox shortly after.
+        inboxItems.removeAll { $0.id == item.id }
         sidebarSelection = nil
         openVault(vaultURL)
     }
@@ -1319,10 +1335,12 @@ final class AppState: ObservableObject {
                 let patched = try VaultIndexer().reindexDocument(index, changedRelativePath: documentId, vaultURL: vaultURL)
                 self.index = patched
                 // Keep the AI sidecar current; a failure must not break the save.
-                do {
-                    try VaultIndexExporter().export(patched, vaultURL: vaultURL)
-                } catch {
-                    Self.exportLogger.error("graph.json export failed: \(error.localizedDescription, privacy: .public)")
+                Task {
+                    do {
+                        try await VaultIndexExporter().export(patched, vaultURL: vaultURL)
+                    } catch {
+                        Self.exportLogger.error("graph.json export failed: \(error.localizedDescription, privacy: .public)")
+                    }
                 }
                 // Re-embed just this document, off-main, AFTER the synchronous reindex
                 // returned. Never gates save success (issue #6: the reindex itself stays
@@ -1371,7 +1389,8 @@ final class AppState: ObservableObject {
         if sidebarSelection == .inbox(item.id) {
             sidebarSelection = nil
         }
-        try? refreshInbox()
+        // The item is in the Trash now; drop it from the in-memory list (a re-scan is async).
+        inboxItems.removeAll { $0.id == item.id }
     }
 
     /// True for the vault's reserved Inbox dropbox (or anything inside it). The indexer
@@ -1439,7 +1458,7 @@ final class AppState: ObservableObject {
                 do {
                     try await Task.sleep(nanoseconds: 2_000_000_000)
                     guard !Task.isCancelled else { return }
-                    try self?.refreshInbox()
+                    try await self?.refreshInbox()
                 } catch is CancellationError {
                     return
                 } catch {

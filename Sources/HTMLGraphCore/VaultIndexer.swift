@@ -20,32 +20,45 @@ public struct VaultIndexer {
         self.normalizer = normalizer
     }
 
-    public func indexVault(at vaultURL: URL) throws -> VaultIndex {
-        let fileURLs = try htmlFiles(in: vaultURL)
-            .sorted { relativePath(for: $0, in: vaultURL) < relativePath(for: $1, in: vaultURL) }
-        let knownIds = Set(fileURLs.map { relativePath(for: $0, in: vaultURL) })
+    /// Indexes a vault over `fileSystem`. Backend-agnostic: the same logic runs against the
+    /// local filesystem (`LocalFileSystem`) today and a remote (SFTP) backend later.
+    public func indexVault(fileSystem: VaultFileSystem) async throws -> VaultIndex {
+        let entries = try await fileSystem.enumerateFiles(under: "")
+            .filter { isHTML($0.relativePath) && !isInboxPath($0.relativePath) }
+            .sorted { $0.relativePath < $1.relativePath }
+        let knownIds = Set(entries.map(\.relativePath))
 
-        let documents = try fileURLs.map { fileURL -> DocumentNode in
-            let relative = relativePath(for: fileURL, in: vaultURL)
-            let html = try String(contentsOf: fileURL, encoding: .utf8)
-            return try documentNode(at: fileURL, relative: relative, html: html)
-        }
-
+        // Read each file exactly ONCE — the node (title/hash) and its outgoing edges are both
+        // derived from the same buffer (previously each file was read twice). mtime comes from
+        // the enumeration so there's no extra per-file stat either.
+        var documents: [DocumentNode] = []
+        documents.reserveCapacity(entries.count)
         var edges: [LinkEdge] = []
-        for fileURL in fileURLs {
-            let sourceId = relativePath(for: fileURL, in: vaultURL)
-            let html = try String(contentsOf: fileURL, encoding: .utf8)
-            edges.append(contentsOf: try linkEdges(forSource: sourceId, html: html, knownDocumentIds: knownIds))
+        for entry in entries {
+            let html = try await fileSystem.readText(at: entry.relativePath)
+            documents.append(try documentNode(
+                relative: entry.relativePath,
+                html: html,
+                absolutePath: fileSystem.absolutePath(for: entry.relativePath) ?? "",
+                lastModified: entry.modificationDate
+            ))
+            edges.append(contentsOf: try linkEdges(forSource: entry.relativePath, html: html, knownDocumentIds: knownIds))
         }
 
         return VaultIndex(
-            vaultId: vaultURL.standardizedFileURL.path,
+            vaultId: fileSystem.vaultIdentity,
             documents: documents,
             edges: edges,
             backlinks: backlinks(from: edges),
             unresolvedLinks: unresolvedLinks(from: edges),
             lastIndexedAt: Date()
         )
+    }
+
+    /// Convenience: index a local vault directory. Wraps `indexVault(fileSystem:)` with a
+    /// `LocalFileSystem` rooted at `vaultURL`.
+    public func indexVault(at vaultURL: URL) async throws -> VaultIndex {
+        try await indexVault(fileSystem: LocalFileSystem(root: vaultURL))
     }
 
     /// Re-parses a single changed file against an existing index and returns a patched
@@ -71,7 +84,13 @@ public struct VaultIndexer {
 
         let fileURL = vaultURL.appendingPathComponent(changedRelativePath)
         let html = try String(contentsOf: fileURL, encoding: .utf8)
-        let recomputed = try documentNode(at: fileURL, relative: changedRelativePath, html: html)
+        let lastModified = (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        let recomputed = try documentNode(
+            relative: changedRelativePath,
+            html: html,
+            absolutePath: fileURL.path,
+            lastModified: lastModified
+        )
         // An in-place edit doesn't move the file, so `absolutePath` is invariant. Preserve
         // the existing node's value rather than the one derived from the freshly built
         // `fileURL` — `indexVault`'s enumerator yields symlink-resolved paths
@@ -116,15 +135,14 @@ public struct VaultIndexer {
 
     /// Builds the `DocumentNode` for one file. `relative` is the vault-relative path
     /// (the document id); `html` is the file's decoded UTF-8 contents.
-    private func documentNode(at fileURL: URL, relative: String, html: String) throws -> DocumentNode {
-        let values = try fileURL.resourceValues(forKeys: [.contentModificationDateKey])
-        return DocumentNode(
+    private func documentNode(relative: String, html: String, absolutePath: String, lastModified: Date) throws -> DocumentNode {
+        DocumentNode(
             id: relative,
             path: relative,
-            absolutePath: fileURL.path,
-            title: try extractor.title(from: html, fallbackFilename: fileURL.lastPathComponent),
+            absolutePath: absolutePath,
+            title: try extractor.title(from: html, fallbackFilename: (relative as NSString).lastPathComponent),
             contentHash: sha256(html),
-            lastModified: values.contentModificationDate ?? .distantPast
+            lastModified: lastModified
         )
     }
 
@@ -164,36 +182,14 @@ public struct VaultIndexer {
         })
     }
 
-    private func htmlFiles(in vaultURL: URL) throws -> [URL] {
-        let keys: Set<URLResourceKey> = [.isRegularFileKey]
-        let enumerator = FileManager.default.enumerator(
-            at: vaultURL,
-            includingPropertiesForKeys: Array(keys),
-            options: [.skipsHiddenFiles]
-        )
-        guard let enumerator else { return [] }
-
-        return try enumerator.compactMap { item in
-            guard let url = item as? URL else { return nil }
-            let values = try url.resourceValues(forKeys: keys)
-            guard values.isRegularFile == true else { return nil }
-            let ext = url.pathExtension.lowercased()
-            guard ext == "html" || ext == "htm" else { return nil }
-            let relative = relativePath(for: url, in: vaultURL)
-            return isInboxPath(relative) ? nil : url
-        }
+    private func isHTML(_ relativePath: String) -> Bool {
+        let ext = (relativePath as NSString).pathExtension.lowercased()
+        return ext == "html" || ext == "htm"
     }
 
     private func isInboxPath(_ relativePath: String) -> Bool {
         relativePath == InboxScanner.inboxDirectoryName ||
             relativePath.hasPrefix("\(InboxScanner.inboxDirectoryName)/")
-    }
-
-    private func relativePath(for fileURL: URL, in vaultURL: URL) -> String {
-        let base = vaultURL.standardizedFileURL.path
-        let full = fileURL.standardizedFileURL.path
-        return String(full.dropFirst(base.count))
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
     private func sha256(_ string: String) -> String {

@@ -146,7 +146,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertEqual(appState.vaultStatusText, "2 documents")
     }
 
-    func testRefreshInboxLoadsPendingInboxItems() throws {
+    func testRefreshInboxLoadsPendingInboxItems() async throws {
         let vaultURL = try makeTemporaryVault(files: [
             "Inbox/idea.html": "<html><head><title>AI Idea</title></head><body></body></html>"
         ])
@@ -154,7 +154,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         let appState = AppState()
         appState.vaultURL = vaultURL
 
-        try appState.refreshInbox()
+        try await appState.refreshInbox()
 
         XCTAssertEqual(appState.inboxItems.map(\.path), ["Inbox/idea.html"])
         XCTAssertEqual(appState.selectedInboxItem?.title, nil)
@@ -164,14 +164,14 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertNil(appState.selectedDocumentId)
     }
 
-    func testAcceptInboxItemMovesFileRefreshesInboxAndStartsReindexing() throws {
+    func testAcceptInboxItemMovesFileRefreshesInboxAndStartsReindexing() async throws {
         let vaultURL = try makeTemporaryVault(files: [
             "Inbox/idea.html": "<html><head><title>AI Idea</title></head><body></body></html>"
         ])
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let appState = AppState()
         appState.vaultURL = vaultURL
-        try appState.refreshInbox()
+        try await appState.refreshInbox()
         let item = try XCTUnwrap(appState.inboxItems.first)
 
         let destinationURL = vaultURL.appendingPathComponent("Notes/idea.html")
@@ -183,14 +183,14 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertTrue(appState.isIndexing || appState.index?.document(id: "Notes/idea.html") != nil)
     }
 
-    func testAddToVaultFilesItemToRootAndRemovesItFromInbox() throws {
+    func testAddToVaultFilesItemToRootAndRemovesItFromInbox() async throws {
         let vaultURL = try makeTemporaryVault(files: [
             "Inbox/draft.html": "<html><head><title>Draft</title></head><body></body></html>"
         ])
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let appState = AppState()
         appState.vaultURL = vaultURL
-        try appState.refreshInbox()
+        try await appState.refreshInbox()
         let item = try XCTUnwrap(appState.inboxItems.first)
 
         appState.addToVault(item, folder: nil)
@@ -201,7 +201,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertNil(appState.errorMessage)
     }
 
-    func testVaultFoldersListsDistinctDocumentFoldersExcludingRoot() throws {
+    func testVaultFoldersListsDistinctDocumentFoldersExcludingRoot() async throws {
         let html = "<html><head><title>T</title></head><body></body></html>"
         let vaultURL = try makeTemporaryVault(files: [
             "index.html": html,
@@ -211,12 +211,12 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         ])
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let appState = AppState()
-        appState.index = try VaultIndexer().indexVault(at: vaultURL)
+        appState.index = try await VaultIndexer().indexVault(at: vaultURL)
 
         XCTAssertEqual(appState.vaultFolders, ["concepts", "guides"])
     }
 
-    func testDocumentTreeBuildsFolderHierarchyFoldersBeforeDocuments() throws {
+    func testDocumentTreeBuildsFolderHierarchyFoldersBeforeDocuments() async throws {
         let html = { (title: String) in "<html><head><title>\(title)</title></head><body></body></html>" }
         let vaultURL = try makeTemporaryVault(files: [
             "index.html": html("Home"),
@@ -225,7 +225,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
             "guides/start.html": html("Start")
         ])
         defer { try? FileManager.default.removeItem(at: vaultURL) }
-        let index = try VaultIndexer().indexVault(at: vaultURL)
+        let index = try await VaultIndexer().indexVault(at: vaultURL)
 
         let tree = DocumentTreeBuilder.build(from: index.documents)
 

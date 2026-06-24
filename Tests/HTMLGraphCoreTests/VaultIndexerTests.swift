@@ -7,8 +7,8 @@ final class VaultIndexerTests: XCTestCase {
             .appendingPathComponent("Fixtures/sample-vault")
     }
 
-    func testIndexesDocumentsAndBuildsBacklinks() throws {
-        let index = try VaultIndexer().indexVault(at: fixtureURL)
+    func testIndexesDocumentsAndBuildsBacklinks() async throws {
+        let index = try await VaultIndexer().indexVault(at: fixtureURL)
 
         XCTAssertEqual(index.documents.count, 6)
         XCTAssertEqual(index.document(id: "index.html")?.title, "HTMLGraph Home")
@@ -27,8 +27,8 @@ final class VaultIndexerTests: XCTestCase {
         XCTAssertEqual(graphToHome.status, .resolved)
     }
 
-    func testClassifiesExternalSameDocumentAndUnresolvedLinks() throws {
-        let index = try VaultIndexer().indexVault(at: fixtureURL)
+    func testClassifiesExternalSameDocumentAndUnresolvedLinks() async throws {
+        let index = try await VaultIndexer().indexVault(at: fixtureURL)
 
         XCTAssertTrue(index.edges.contains { edge in
             edge.href == "https://obsidian.md/" && edge.status == .external
@@ -41,7 +41,7 @@ final class VaultIndexerTests: XCTestCase {
         } == true)
     }
 
-    func testDuplicateHrefsFromOneSourceHaveUniqueEdgeIds() throws {
+    func testDuplicateHrefsFromOneSourceHaveUniqueEdgeIds() async throws {
         let vaultURL = try makeTemporaryVault(files: [
             "index.html": """
             <!doctype html>
@@ -57,7 +57,7 @@ final class VaultIndexerTests: XCTestCase {
         ])
         defer { try? FileManager.default.removeItem(at: vaultURL) }
 
-        let index = try VaultIndexer().indexVault(at: vaultURL)
+        let index = try await VaultIndexer().indexVault(at: vaultURL)
         let duplicateEdges = index.edges.filter { $0.sourceId == "index.html" && $0.href == "./target.html" }
 
         XCTAssertEqual(duplicateEdges.count, 2)
@@ -130,7 +130,7 @@ final class VaultIndexerTests: XCTestCase {
         XCTAssertEqual(nestedDocument.status, .resolved)
     }
 
-    func testIndexerExcludesPendingInboxDocumentsFromMainGraph() throws {
+    func testIndexerExcludesPendingInboxDocumentsFromMainGraph() async throws {
         let vaultURL = try makeTemporaryVault(files: [
             "index.html": """
             <!doctype html>
@@ -145,7 +145,7 @@ final class VaultIndexerTests: XCTestCase {
         ])
         defer { try? FileManager.default.removeItem(at: vaultURL) }
 
-        let index = try VaultIndexer().indexVault(at: vaultURL)
+        let index = try await VaultIndexer().indexVault(at: vaultURL)
 
         XCTAssertEqual(index.documents.map(\.id), ["index.html"])
         XCTAssertNil(index.document(id: "Inbox/draft.html"))
@@ -154,7 +154,7 @@ final class VaultIndexerTests: XCTestCase {
         } ?? false)
     }
 
-    func testExportedSidecarIsNotIndexedAsDocument() throws {
+    func testExportedSidecarIsNotIndexedAsDocument() async throws {
         let vaultURL = try makeTemporaryVault(files: [
             "index.html": """
             <!doctype html>
@@ -163,14 +163,14 @@ final class VaultIndexerTests: XCTestCase {
         ])
         defer { try? FileManager.default.removeItem(at: vaultURL) }
 
-        let initial = try VaultIndexer().indexVault(at: vaultURL)
+        let initial = try await VaultIndexer().indexVault(at: vaultURL)
         XCTAssertEqual(initial.documents.map(\.id), ["index.html"])
 
         // Writing the AI sidecar must not feed back into the graph: the
         // hidden `.htmlgraph/` dir is skipped and graph.json is not HTML.
-        try VaultIndexExporter().export(initial, vaultURL: vaultURL)
+        try await VaultIndexExporter().export(initial, vaultURL: vaultURL)
 
-        let reindexed = try VaultIndexer().indexVault(at: vaultURL)
+        let reindexed = try await VaultIndexer().indexVault(at: vaultURL)
         XCTAssertEqual(reindexed.documents.map(\.id), ["index.html"])
         XCTAssertFalse(reindexed.documents.contains { $0.id.contains(".htmlgraph") })
     }
