@@ -189,8 +189,7 @@ public struct VaultIndexer {
     }
 
     private func isInboxPath(_ relativePath: String) -> Bool {
-        relativePath == InboxScanner.inboxDirectoryName ||
-            relativePath.hasPrefix("\(InboxScanner.inboxDirectoryName)/")
+        InboxScanner.isInboxPath(relativePath)
     }
 
     private func sha256(_ string: String) -> String {

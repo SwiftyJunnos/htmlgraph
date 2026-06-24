@@ -43,7 +43,6 @@ public struct InboxAccepter {
     }
 
     private func isInsideInbox(_ relativePath: String) -> Bool {
-        relativePath == InboxScanner.inboxDirectoryName ||
-            relativePath.hasPrefix("\(InboxScanner.inboxDirectoryName)/")
+        InboxScanner.isInboxPath(relativePath)
     }
 }

@@ -48,8 +48,12 @@ Design decisions:
 3. **`trash` is a protocol op, not `FileManager.trashItem`.** Local → the user's Trash;
    remote → relocate into a vault-internal trash area. Callers don't care which.
 4. **Atomic / create-only writes are expressed as `VaultWriteOptions`**, mapped by each
-   backend to its durability/exclusivity primitives (local: temp+rename; SFTP:
-   temp+`posix-rename@openssh.com` + read-back verify).
+   backend to its durability/exclusivity primitives (local: `Data.write(.atomic)` temp+rename;
+   SFTP: write a temp sibling, move the original aside to a `.htmlgraph-bak-*`, rename the temp
+   into place, then delete the backup — the original is never removed before its replacement is
+   in place, so a failure mid-swap leaves it recoverable. Plain SFTP rename can't overwrite, so a
+   brief window exists where the target name is momentarily absent; a true atomic
+   `posix-rename@openssh.com` is a hardening follow-up once the Citadel extension is available).
 
 ### What stays out of the protocol
 

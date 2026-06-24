@@ -630,8 +630,10 @@ final class AppState: ObservableObject {
         // actual vault change, restore the posture the user last chose for this vault
         // (Safe by default). Same-vault reindexes (creating a doc, accepting an inbox
         // item) keep the live settings so an enabled session isn't silently revoked.
-        let isDifferentVault = (vaultFileSystem?.vaultIdentity)?
-            .caseInsensitiveCompare(identity) != .orderedSame
+        // Exact comparison: `vaultIdentity` is the security/cache key (and the SecurityStore is
+        // keyed by the exact string), so a case-insensitive match could treat distinct remote
+        // vaults like `/Vault` and `/vault` as one session and carry over the wrong trust posture.
+        let isDifferentVault = vaultFileSystem?.vaultIdentity != identity
 
         // Tear down a previous REMOTE connection when it's being REPLACED — switching to a local
         // vault, a different remote, or even a fresh connection to the SAME host (reopening from
@@ -1565,12 +1567,7 @@ final class AppState: ObservableObject {
     /// excludes these paths from the graph, so the sidebar must never offer them as a
     /// create/move destination — a document landing there silently becomes "Unfiled".
     private func isInboxRelativePath(_ relativePath: String) -> Bool {
-        // Case-insensitive: on a case-insensitive volume (APFS default) a folder typed as
-        // "inbox"/"INBOX" still resolves to the reserved Inbox dir, so it must be guarded
-        // too — otherwise a document placed there is silently excluded from the graph.
-        let inbox = InboxScanner.inboxDirectoryName.lowercased()
-        let path = relativePath.lowercased()
-        return path == inbox || path.hasPrefix(inbox + "/")
+        InboxScanner.isInboxPath(relativePath)
     }
 
     /// Returns `base` (vault-relative) bumped to "base 2", "base 3", … until it names a

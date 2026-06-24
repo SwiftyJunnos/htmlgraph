@@ -4,6 +4,17 @@ import Foundation
 public struct InboxScanner {
     public static let inboxDirectoryName = "Inbox"
 
+    /// Whether a vault-relative path IS the reserved Inbox directory or lives inside it. The
+    /// single source of truth for "is this the Inbox", shared by the indexer (exclude from the
+    /// graph), the accepter (file out of / never into the Inbox), and AppState's folder guards.
+    /// Case-insensitive: on a case-insensitive volume (APFS default) a folder typed as
+    /// "inbox"/"INBOX" resolves to the same reserved directory, so it must count too.
+    public static func isInboxPath(_ relativePath: String) -> Bool {
+        let inbox = inboxDirectoryName.lowercased()
+        let path = relativePath.lowercased()
+        return path == inbox || path.hasPrefix(inbox + "/")
+    }
+
     private let extractor: HTMLMetadataExtractor
 
     public init(extractor: HTMLMetadataExtractor = HTMLMetadataExtractor()) {
