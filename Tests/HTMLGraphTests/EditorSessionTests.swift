@@ -349,6 +349,7 @@ final class EditorSessionTests: XCTestCase {
         addTeardownBlock { try? FileManager.default.removeItem(at: vaultURL) }
         let appState = AppState()
         appState.vaultURL = vaultURL
+        appState.vaultFileSystem = LocalFileSystem(root: vaultURL)
         appState.index = try await VaultIndexer().indexVault(at: vaultURL)
         return (appState, vaultURL)
     }

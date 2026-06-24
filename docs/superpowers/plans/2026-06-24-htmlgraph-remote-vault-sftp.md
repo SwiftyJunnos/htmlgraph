@@ -204,13 +204,21 @@ Operations the protocol must cover, by call site:
     inbox listing) run on the remote vault immediately (via M8a). `isRemoteVault` (vaultURL nil +
     vaultFileSystem set) added for UI gating. Additive, behavior-preserving — 135 tests +
     xcodebuild green.
-  - **M8c — remote writes + UI (NEXT).** Flip file-op/editor guards from `guard let vaultURL` to
-    `guard let fileSystem = vaultFileSystem` (+ a `reindexCurrentVault()` helper replacing
-    `beginSession(at: vaultURL)`) so remote create/move/rename/trash/duplicate/edit work (~12
-    methods; behavior-preserving for local). A "Connect to Remote…" dialog (host/user/pw/path)
+  - ✅ **M8c part 1 — remote-write guard flips (DONE 2026-06-24).** File-op + editor methods now
+    `guard let fileSystem = vaultFileSystem` instead of `vaultURL`; `reindexCurrentVault()` replaces
+    `beginSession(at: vaultURL)` (reindexes via the session FS); `fileInboxItem` takes a `fileSystem`;
+    `acceptInboxItem` keeps `vaultURL` (local destination picker only); security keying,
+    `regenerateAgentGuide`, and `vaultStatusText` use `vaultFileSystem`/`vaultIdentity`. So remote
+    create/move/rename/trash/duplicate/edit/inbox now work. **Also fixed a pre-existing regression**:
+    M8a/M8b's session-FS change had broken 5 app-bundle tests (their setups set `appState.vaultURL`
+    directly, bypassing `beginSession`, leaving `vaultFileSystem` nil) — `vaultFileSystem` is now
+    internal and the test setups set it. (Process miss: the `swift test | tail` gate only showed the
+    *last* bundle's summary, hiding the app bundle's failures; now BOTH bundles are checked.)
+    Verified: 216 tests (135 core + 81 app) + xcodebuild green.
+  - **M8c part 2 — connect UI + creds (NEXT).** A "Connect to Remote…" dialog (host/user/pw/path)
     wired to a menu, calling `openRemoteVault`. Password in Keychain + persist remote vaults in
-    recents (generalize `RecentVault`). Host-key TOFU (replace `acceptAnything()`). Hide
-    local-only UI (Reveal in Finder / external editor) for remote vaults via `isRemoteVault`.
+    recents (generalize `RecentVault`). Host-key TOFU (replace `acceptAnything()`). Hide local-only
+    UI (Reveal in Finder / external editor) for remote vaults via `isRemoteVault`.
 
 - **M9 — `SFTPFileSystem` implementation. IN PROGRESS.**
   - ✅ **Citadel added** (`Package.swift` → `orlandos-nl/Citadel` from 0.7.0; resolved to

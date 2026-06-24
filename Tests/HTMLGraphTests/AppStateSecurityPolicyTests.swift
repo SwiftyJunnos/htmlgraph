@@ -46,6 +46,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         let appState = AppState(securityStore: store)
         let url = URL(fileURLWithPath: "/tmp/vaultX", isDirectory: true)
         appState.vaultURL = url
+        appState.vaultFileSystem = LocalFileSystem(root: url)
 
         appState.trustMode = .trusted
         appState.allowsNetworkAccess = true
@@ -109,6 +110,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertEqual(appState.vaultStatusText, "No vault open")
 
         appState.vaultURL = URL(fileURLWithPath: "/Users/test/Documents/sample-vault", isDirectory: true)
+        appState.vaultFileSystem = LocalFileSystem(root: URL(fileURLWithPath: "/Users/test/Documents/sample-vault", isDirectory: true))
         appState.isIndexing = true
 
         XCTAssertEqual(appState.openVaultButtonTitle, "Change Vault")
@@ -153,6 +155,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let appState = AppState()
         appState.vaultURL = vaultURL
+        appState.vaultFileSystem = LocalFileSystem(root: vaultURL)
 
         try await appState.refreshInbox()
 
@@ -171,6 +174,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let appState = AppState()
         appState.vaultURL = vaultURL
+        appState.vaultFileSystem = LocalFileSystem(root: vaultURL)
         try await appState.refreshInbox()
         let item = try XCTUnwrap(appState.inboxItems.first)
 
@@ -190,6 +194,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let appState = AppState()
         appState.vaultURL = vaultURL
+        appState.vaultFileSystem = LocalFileSystem(root: vaultURL)
         try await appState.refreshInbox()
         let item = try XCTUnwrap(appState.inboxItems.first)
 
@@ -244,6 +249,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let appState = AppState()
         appState.vaultURL = vaultURL
+        appState.vaultFileSystem = LocalFileSystem(root: vaultURL)
 
         let edge = LinkEdge(
             id: "index.html#link-0",
@@ -273,6 +279,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let appState = AppState()
         appState.vaultURL = vaultURL
+        appState.vaultFileSystem = LocalFileSystem(root: vaultURL)
 
         let edge = LinkEdge(
             id: "index.html#link-0",
