@@ -1,6 +1,6 @@
 # Remote Vault over SSH — In-app SFTP filesystem layer
 
-Status: M6 done — editor save path async. Next: M7 (preview servers + UI gating).
+Status: M7 done — loopback preview server reads via FS, per-request concurrency. Next: M8 (identity model).
 Started: 2026-06-24
 Owner: Junnos
 
@@ -178,11 +178,17 @@ Operations the protocol must cover, by call site:
   to M10): `directoryExists` in `openRecent` (bookmark path) and `finishIndexing`'s
   pendingEmptyFolders pruning still use `FileManager`.
 
-- **M7 — Migrate the preview servers + UI gating.**
-  `VaultHTTPServer` responder and `VaultResourceSchemeHandler` read through the FS (range
-  reads → `readRange`). Add a connection pool / concurrency so per-request remote I/O doesn't
-  serialize. Hide/disable local-only UI actions (Reveal in Finder, external editor) for
-  remote vaults.
+- **M7 — Preview server via FS + per-request concurrency. ✅ DONE (2026-06-24).**
+  `VaultHTTPResponder` holds a `VaultFileSystem` (+ `vaultURL:` convenience init) and
+  `respond(...)` is `async`, reading via `metadata`/`readData`/`readRange` (range reads →
+  `readRange`); `fileURL(forTarget:)`+`readFile` replaced by `relativePath(forTarget:token:)`.
+  `VaultHTTPServer.start(fileSystem:)` (+ `vaultURL:` convenience — AppState still calls the
+  latter); each request's response is generated in a `Task` off the serial queue so a slow
+  remote read can't block other connections. `VaultHTTPServerTests` responder tests await.
+  `VaultResourceSchemeHandler` (the `htmlgraph://` handler) is **dead code** — never registered
+  (loopback HTTP replaced it); left untouched except its still-used static `mimeType(for:)`.
+  Remaining: UI gating (hide Reveal-in-Finder / external-editor for remote vaults) deferred to
+  M8/M10. Verified: `swift test` (132) + `xcodebuild`.
 
 - **M8 — Vault identity + selection model.**
   Generalize `RecentVault` / `VaultIndex.vaultId` to a `VaultRef` (local URL **or**

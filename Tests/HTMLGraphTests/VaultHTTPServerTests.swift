@@ -34,65 +34,65 @@ final class VaultHTTPServerTests: XCTestCase {
 
     // MARK: - Responder
 
-    func testGetServesFileWithMimeAndBody() {
-        let response = makeResponder().respond(method: "GET", target: "/\(token)/index.html", rangeHeader: nil)
+    func testGetServesFileWithMimeAndBody() async {
+        let response = await makeResponder().respond(method: "GET", target: "/\(token)/index.html", rangeHeader: nil)
         XCTAssertEqual(response.status, 200)
         XCTAssertEqual(response.headerValue("Content-Type"), "text/html")
         XCTAssertEqual(response.headerValue("Accept-Ranges"), "bytes")
         XCTAssertEqual(String(data: response.body, encoding: .utf8), "<h1>Hi</h1>")
     }
 
-    func testHeadOmitsBodyButReportsFullLength() {
-        let response = makeResponder().respond(method: "HEAD", target: "/\(token)/index.html", rangeHeader: nil)
+    func testHeadOmitsBodyButReportsFullLength() async {
+        let response = await makeResponder().respond(method: "HEAD", target: "/\(token)/index.html", rangeHeader: nil)
         XCTAssertEqual(response.status, 200)
         XCTAssertTrue(response.body.isEmpty)
         XCTAssertEqual(response.headerValue("Content-Length"), "11")
     }
 
-    func testWrongTokenIsForbidden() {
-        let response = makeResponder().respond(method: "GET", target: "/wrongtoken/index.html", rangeHeader: nil)
+    func testWrongTokenIsForbidden() async {
+        let response = await makeResponder().respond(method: "GET", target: "/wrongtoken/index.html", rangeHeader: nil)
         XCTAssertEqual(response.status, 403)
     }
 
-    func testPathTraversalIsForbidden() {
-        let response = makeResponder().respond(method: "GET", target: "/\(token)/../../etc/passwd", rangeHeader: nil)
+    func testPathTraversalIsForbidden() async {
+        let response = await makeResponder().respond(method: "GET", target: "/\(token)/../../etc/passwd", rangeHeader: nil)
         XCTAssertEqual(response.status, 403)
     }
 
-    func testMissingFileIsNotFound() {
-        let response = makeResponder().respond(method: "GET", target: "/\(token)/nope.html", rangeHeader: nil)
+    func testMissingFileIsNotFound() async {
+        let response = await makeResponder().respond(method: "GET", target: "/\(token)/nope.html", rangeHeader: nil)
         XCTAssertEqual(response.status, 404)
     }
 
-    func testUnsupportedMethodIsNotAllowed() {
-        let response = makeResponder().respond(method: "POST", target: "/\(token)/index.html", rangeHeader: nil)
+    func testUnsupportedMethodIsNotAllowed() async {
+        let response = await makeResponder().respond(method: "POST", target: "/\(token)/index.html", rangeHeader: nil)
         XCTAssertEqual(response.status, 405)
         XCTAssertEqual(response.headerValue("Allow"), "GET, HEAD")
     }
 
-    func testQueryAndFragmentAreStripped() {
-        let response = makeResponder().respond(method: "GET", target: "/\(token)/index.html?v=1#top", rangeHeader: nil)
+    func testQueryAndFragmentAreStripped() async {
+        let response = await makeResponder().respond(method: "GET", target: "/\(token)/index.html?v=1#top", rangeHeader: nil)
         XCTAssertEqual(response.status, 200)
         XCTAssertEqual(String(data: response.body, encoding: .utf8), "<h1>Hi</h1>")
     }
 
-    func testByteRangeReturnsPartialContent() {
-        let response = makeResponder().respond(method: "GET", target: "/\(token)/assets/data.bin", rangeHeader: "bytes=0-3")
+    func testByteRangeReturnsPartialContent() async {
+        let response = await makeResponder().respond(method: "GET", target: "/\(token)/assets/data.bin", rangeHeader: "bytes=0-3")
         XCTAssertEqual(response.status, 206)
         XCTAssertEqual(response.headerValue("Content-Range"), "bytes 0-3/256")
         XCTAssertEqual(response.headerValue("Content-Length"), "4")
         XCTAssertEqual(response.body, binBytes.subdata(in: 0..<4))
     }
 
-    func testSuffixByteRange() {
-        let response = makeResponder().respond(method: "GET", target: "/\(token)/assets/data.bin", rangeHeader: "bytes=-2")
+    func testSuffixByteRange() async {
+        let response = await makeResponder().respond(method: "GET", target: "/\(token)/assets/data.bin", rangeHeader: "bytes=-2")
         XCTAssertEqual(response.status, 206)
         XCTAssertEqual(response.headerValue("Content-Range"), "bytes 254-255/256")
         XCTAssertEqual(response.body, binBytes.subdata(in: 254..<256))
     }
 
-    func testUnsatisfiableRangeIs416() {
-        let response = makeResponder().respond(method: "GET", target: "/\(token)/assets/data.bin", rangeHeader: "bytes=999-")
+    func testUnsatisfiableRangeIs416() async {
+        let response = await makeResponder().respond(method: "GET", target: "/\(token)/assets/data.bin", rangeHeader: "bytes=999-")
         XCTAssertEqual(response.status, 416)
         XCTAssertEqual(response.headerValue("Content-Range"), "bytes */256")
     }
