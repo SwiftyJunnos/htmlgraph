@@ -223,15 +223,26 @@ Operations the protocol must cover, by call site:
     the chrome shows for remote vaults too. `RemoteConnectView.swift` registered in pbxproj.
     Verified: 216 tests + xcodebuild green. So a remote vault now opens from the UI and its sidebar
     list + search work.
-  - **M8d — remote document PREVIEW (NEXT).** ReaderPane's web views (`HTMLDocumentWebView`,
-    `VisualHTMLEditor`) are gated on `vaultURL` and build from `document.absolutePath` (a file URL),
-    so remote docs don't render. Refactor the preview to load `vaultBaseURL` + the document's
-    relative id (`document.id`) directly (the loopback server already serves remote files via M7/M8a)
-    instead of mapping a local file URL; gate on `vaultBaseURL`/`hasOpenVault`. Also hide local-only
-    actions (Reveal in Finder / Open in Browser / external editor) for remote via `isRemoteVault`.
-  - **M10** — Keychain for the password + remote recents (generalize `RecentVault`); host-key TOFU
-    (replace `acceptAnything()`); key-based auth; `posix-rename@openssh.com` atomic writes;
-    connection lifecycle; cache relocation.
+  - ✅ **M8d — remote document PREVIEW (DONE 2026-06-24).** ReaderPane no longer gates the preview
+    on `vaultURL`. Two helpers carry it: `previewVaultURL` (the real local root, or a synthetic
+    `URL(fileURLWithPath: "/")` for remote) and `previewFileURL(relativeId:absolutePath:)` (the
+    on-disk path locally, or `"/" + document.id` for remote). The reader, visual editor, and inbox
+    preview all build from those, so `VaultHTTPServer.resourceURL(forFileAt:baseURL:vaultURL:)` derives
+    the relative id against the `/` root and yields the exact loopback URL the server serves
+    (`baseURL + id`); `fileURL(forLoopback:)` and `HTMLDocumentNavigationPolicy` round-trip identically.
+    **Local is byte-identical** (real URLs unchanged); only remote uses the synthetic root, and the
+    synthetic file URLs are pure path-math — never read from disk (the web view loads the loopback URL).
+    Local-only actions (Reveal in Finder / Open in Browser / external editor / Full Path) are hidden for
+    remote via `isRemoteVault` in both the sidebar context menus and the reader's action menus. New
+    tests: `testSyntheticRootMapsRemoteRelativeIdToLoopback` (VaultHTTPServer round-trip) +
+    `testSyntheticRootClassifiesRemoteInternalDocument` (nav policy). Verified: 218 tests (135 core +
+    83 app) + xcodebuild green. **Remote vaults are now fully usable: connect → browse → search →
+    preview (read + visual) → edit → save → file-ops.**
+  - **M10 (NEXT) — hardening + polish.** Remote display name/title (currently `vaultDisplayName` is
+    nil for remote so the window title falls back to "HTMLGraph"; derive from `vaultIdentity`).
+    Keychain for the password + remote recents (generalize `RecentVault`); host-key TOFU (replace
+    `acceptAnything()`); key-based auth; `posix-rename@openssh.com` atomic writes; connection
+    lifecycle (close SSH on vault switch/quit); cache relocation.
 
 - **M9 — `SFTPFileSystem` implementation. IN PROGRESS.**
   - ✅ **Citadel added** (`Package.swift` → `orlandos-nl/Citadel` from 0.7.0; resolved to

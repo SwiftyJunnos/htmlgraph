@@ -124,6 +124,30 @@ final class VaultHTTPServerTests: XCTestCase {
         XCTAssertEqual(mappedBack.standardizedFileURL, fileURL.standardizedFileURL)
     }
 
+    /// Remote vaults have no on-disk path: the preview uses a synthetic "/" root and builds the
+    /// document URL as "/" + the vault-relative id. That must produce exactly the loopback URL
+    /// the server serves, and round-trip back to the same relative path — proving remote
+    /// documents render through the identical mapping the reader uses for local files.
+    func testSyntheticRootMapsRemoteRelativeIdToLoopback() throws {
+        let baseURL = try XCTUnwrap(URL(string: "http://127.0.0.1:50505/\(token)/"))
+        let syntheticRoot = URL(fileURLWithPath: "/")
+
+        for relativeId in ["index.html", "notes/page.html", "a/b/c/deep.html"] {
+            let documentURL = URL(fileURLWithPath: "/" + relativeId)
+
+            let resourceURL = try XCTUnwrap(
+                VaultHTTPServer.resourceURL(forFileAt: documentURL, baseURL: baseURL, vaultURL: syntheticRoot),
+                "expected a loopback URL for \(relativeId)"
+            )
+            XCTAssertEqual(resourceURL.absoluteString, "http://127.0.0.1:50505/\(token)/\(relativeId)")
+
+            let mappedBack = try XCTUnwrap(
+                VaultHTTPServer.fileURL(forLoopback: resourceURL, baseURL: baseURL, vaultURL: syntheticRoot)
+            )
+            XCTAssertEqual(mappedBack.standardizedFileURL, documentURL.standardizedFileURL)
+        }
+    }
+
     func testResourceURLRejectsFilesOutsideVault() {
         let baseURL = URL(string: "http://127.0.0.1:50505/\(token)/")!
         XCTAssertNil(

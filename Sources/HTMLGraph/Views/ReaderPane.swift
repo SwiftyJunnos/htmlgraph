@@ -101,16 +101,18 @@ struct ReaderPane: View {
                     .fixedSize()
                     .help("Add this item to your vault so it joins the graph. Click for the vault root, or use the menu to pick a folder.")
 
-                    openInEditorButton(absolutePath: item.absolutePath)
+                    if !appState.isRemoteVault {
+                        openInEditorButton(absolutePath: item.absolutePath)
+                    }
                 }
                 .padding()
 
                 Divider()
 
-                if let vaultURL = appState.vaultURL {
+                if let vaultURL = previewVaultURL {
                     if let baseURL = appState.vaultBaseURL {
                         documentWebView(
-                            documentURL: URL(fileURLWithPath: item.absolutePath),
+                            documentURL: previewFileURL(relativeId: item.id, absolutePath: item.absolutePath),
                             identity: inboxWebViewIdentity(for: item, vaultURL: vaultURL),
                             vaultURL: vaultURL,
                             baseURL: baseURL
@@ -119,12 +121,7 @@ struct ReaderPane: View {
                         preparingPreview
                     }
                 } else {
-                    ContentUnavailableView(
-                        "No vault selected",
-                        systemImage: "folder",
-                        description: Text("Choose a local HTML folder to preview this inbox item.")
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    noVaultPlaceholder
                 }
             } else if let document = appState.selectedDocument {
                 HStack(alignment: .center, spacing: 12) {
@@ -168,7 +165,7 @@ struct ReaderPane: View {
 
                 documentContent(for: document)
             } else {
-                if appState.vaultURL == nil {
+                if !appState.hasOpenVault {
                     VStack(spacing: 16) {
                         ContentUnavailableView(
                             "Open a vault",
@@ -275,7 +272,8 @@ struct ReaderPane: View {
                     Label("Edit HTML Source", systemImage: editorMode == .source ? "checkmark" : "chevron.left.forwardslash.chevron.right")
                 }
             }
-            if !editors.isEmpty {
+            // External-editor and Finder actions need an on-disk path; a remote vault has none.
+            if !editors.isEmpty, !appState.isRemoteVault {
                 Section("Open Source In…") {
                     ForEach(editors) { editor in
                         Button("Open in \(editor.name)") {
@@ -284,9 +282,11 @@ struct ReaderPane: View {
                     }
                 }
             }
-            Divider()
-            Button("Reveal in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: absolutePath)])
+            if !appState.isRemoteVault {
+                Divider()
+                Button("Reveal in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: absolutePath)])
+                }
             }
         } label: {
             Image(systemName: "ellipsis.circle")
@@ -349,11 +349,11 @@ struct ReaderPane: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .visual:
-            if let vaultURL = appState.vaultURL {
+            if let vaultURL = previewVaultURL {
                 if let baseURL = appState.vaultBaseURL {
                     VisualHTMLEditor(
                         documentId: document.id,
-                        documentURL: URL(fileURLWithPath: document.absolutePath),
+                        documentURL: previewFileURL(relativeId: document.id, absolutePath: document.absolutePath),
                         vaultURL: vaultURL,
                         baseURL: baseURL,
                         allowsNetworkAccess: appState.allowsNetworkAccess,
@@ -374,10 +374,10 @@ struct ReaderPane: View {
                 noVaultPlaceholder
             }
         case .read:
-            if let vaultURL = appState.vaultURL {
+            if let vaultURL = previewVaultURL {
                 if let baseURL = appState.vaultBaseURL {
                     documentWebView(
-                        documentURL: URL(fileURLWithPath: document.absolutePath),
+                        documentURL: previewFileURL(relativeId: document.id, absolutePath: document.absolutePath),
                         identity: webViewIdentity(for: document, vaultURL: vaultURL),
                         vaultURL: vaultURL,
                         baseURL: baseURL
@@ -393,11 +393,29 @@ struct ReaderPane: View {
 
     private var noVaultPlaceholder: some View {
         ContentUnavailableView(
-            "No vault selected",
+            "No vault open",
             systemImage: "folder",
-            description: Text("Choose a local HTML folder to render this document.")
+            description: Text("Open a local or remote vault to render this document.")
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// The vault root used for the preview's path math. Locally it's the real vault URL.
+    /// Remotely there's no on-disk path, so a synthetic "/" root stands in: a document's
+    /// vault-relative id is its whole identity, and every preview path helper (loopback
+    /// mapping, containment, navigation classification) needs only that relative path — which
+    /// `"/" + id` yields against the "/" root, reusing the same machinery as local. nil only
+    /// when no vault is open.
+    private var previewVaultURL: URL? {
+        if let vaultURL = appState.vaultURL { return vaultURL }
+        return appState.hasOpenVault ? URL(fileURLWithPath: "/") : nil
+    }
+
+    /// The file URL used purely for relative-path math and the loopback mapping — never read
+    /// from disk (the web view loads the loopback URL the server resolves). Locally it's the
+    /// content's on-disk path; remotely a synthetic path under "/" built from its relative id.
+    private func previewFileURL(relativeId: String, absolutePath: String) -> URL {
+        appState.isRemoteVault ? URL(fileURLWithPath: "/" + relativeId) : URL(fileURLWithPath: absolutePath)
     }
 
     private func handleSelectionChange(from oldValue: SidebarSelection?, to newValue: SidebarSelection?) {

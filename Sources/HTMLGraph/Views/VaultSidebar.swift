@@ -228,12 +228,17 @@ private struct DocumentTreeRows: View {
 
 @ViewBuilder @MainActor
 private func documentContextMenu(_ document: DocumentNode, appState: AppState) -> some View {
-    Button("Open in Browser") { SidebarCommands.openInBrowser(absolutePath: document.absolutePath) }
-    Button("Reveal in Finder") { SidebarCommands.reveal(absolutePath: document.absolutePath) }
+    // Finder/browser actions need an on-disk path, which a remote vault has none of.
+    if !appState.isRemoteVault {
+        Button("Open in Browser") { SidebarCommands.openInBrowser(absolutePath: document.absolutePath) }
+        Button("Reveal in Finder") { SidebarCommands.reveal(absolutePath: document.absolutePath) }
+    }
     Menu("Copy") {
         Button("Title") { SidebarCommands.copyToPasteboard(document.title) }
         Button("Relative Path") { SidebarCommands.copyToPasteboard(document.path) }
-        Button("Full Path") { SidebarCommands.copyToPasteboard(document.absolutePath) }
+        if !appState.isRemoteVault {
+            Button("Full Path") { SidebarCommands.copyToPasteboard(document.absolutePath) }
+        }
         Button("As HTML Link") { SidebarCommands.copyToPasteboard(SidebarCommands.htmlLink(for: document)) }
     }
     Divider()
@@ -268,8 +273,10 @@ private func inboxContextMenu(_ item: InboxItem, appState: AppState) -> some Vie
         }
     }
     Divider()
-    Button("Open in Browser") { SidebarCommands.openInBrowser(absolutePath: item.absolutePath) }
-    Button("Reveal in Finder") { SidebarCommands.reveal(absolutePath: item.absolutePath) }
+    if !appState.isRemoteVault {
+        Button("Open in Browser") { SidebarCommands.openInBrowser(absolutePath: item.absolutePath) }
+        Button("Reveal in Finder") { SidebarCommands.reveal(absolutePath: item.absolutePath) }
+    }
     Button("Copy Path") { SidebarCommands.copyToPasteboard(item.path) }
     Divider()
     Button("Move to Trash", role: .destructive) { SidebarActions.deleteInbox(item, appState: appState) }
