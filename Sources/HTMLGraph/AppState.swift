@@ -363,7 +363,7 @@ final class AppState: ObservableObject {
     }
 
     var openVaultButtonTitle: String {
-        vaultURL == nil ? "Open Vault" : "Change Vault"
+        hasOpenVault ? "Change Vault" : "Open Vault"
     }
 
     /// SF Symbol for the open/change-vault action. The directional "arrow into a
@@ -379,12 +379,11 @@ final class AppState: ObservableObject {
     }
 
     var vaultDisplayName: String? {
-        guard let vaultURL else { return nil }
-        return vaultURL.lastPathComponent.isEmpty ? vaultURL.path : vaultURL.lastPathComponent
+        vaultFileSystem?.displayName
     }
 
     var vaultDisplayPath: String? {
-        vaultURL?.standardizedFileURL.path
+        vaultFileSystem?.displaySubtitle
     }
 
     var vaultStatusText: String {
@@ -535,6 +534,12 @@ final class AppState: ObservableObject {
         // item) keep the live settings so an enabled session isn't silently revoked.
         let isDifferentVault = (vaultFileSystem?.vaultIdentity)?
             .caseInsensitiveCompare(identity) != .orderedSame
+
+        // Tear down a previous REMOTE connection when actually switching vaults, so SSH
+        // sessions don't leak across opens. Same-vault reindexes reuse the live connection.
+        if isDifferentVault, let previousRemote = vaultFileSystem as? SFTPFileSystem {
+            Task { await previousRemote.disconnect() }
+        }
 
         indexingTask?.cancel()
         inboxPollingTask?.cancel()

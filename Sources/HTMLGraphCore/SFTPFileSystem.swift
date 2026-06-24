@@ -21,6 +21,8 @@ public enum SFTPCredential: Sendable {
 /// cache; concurrent first-use can briefly open two connections.
 public struct SFTPFileSystem: VaultFileSystem {
     public let vaultIdentity: String
+    public let displayName: String
+    public let displaySubtitle: String?
     /// Normalized absolute remote root (no trailing slash, never empty).
     private let root: String
     private let connection: SFTPConnection
@@ -29,11 +31,23 @@ public struct SFTPFileSystem: VaultFileSystem {
         let root = Self.normalizeRoot(remotePath)
         self.root = root
         self.vaultIdentity = "sftp://\(username)@\(host):\(port)\(root)"
+        // The window title shows the remote folder name (host when the root is "/"); the
+        // subtitle shows where it lives, omitting the default SSH port.
+        let lastComponent = (root as NSString).lastPathComponent
+        self.displayName = (lastComponent.isEmpty || lastComponent == "/") ? host : lastComponent
+        let hostPort = port == 22 ? host : "\(host):\(port)"
+        self.displaySubtitle = "\(username)@\(hostPort):\(root)"
         self.connection = SFTPConnection(host: host, port: port, username: username, credential: credential)
     }
 
     /// Remote/SSH vaults have no local on-disk path.
     public func absolutePath(for relativePath: String) -> String? { nil }
+
+    /// Closes the live SSH/SFTP connection. Call when switching away from this vault so SSH
+    /// sessions don't leak across opens. Safe to call when never connected (a no-op).
+    public func disconnect() async {
+        await connection.disconnect()
+    }
 
     // MARK: - Enumeration
 

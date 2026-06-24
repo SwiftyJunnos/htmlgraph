@@ -76,6 +76,14 @@ public protocol VaultFileSystem: Sendable {
     /// stable URL like `sftp://user@host/path`.
     var vaultIdentity: String { get }
 
+    /// A short, human-readable name for the vault — its folder name. Drives the window title
+    /// and recents/UI labels. Defaults to `vaultIdentity`.
+    var displayName: String { get }
+
+    /// A secondary label: the full local path, or `user@host:path` for a remote vault. nil
+    /// when there's nothing more to show than `displayName`. Defaults to nil.
+    var displaySubtitle: String? { get }
+
     /// The absolute on-disk path for a vault-relative path, when one meaningfully exists
     /// (local backends). Remote backends return `nil` — there is no local path. Used only
     /// to populate `DocumentNode.absolutePath` (a local convenience for Finder /
@@ -138,6 +146,9 @@ public protocol VaultFileSystem: Sendable {
 public extension VaultFileSystem {
     /// Remote/non-local backends have no on-disk path by default.
     func absolutePath(for relativePath: String) -> String? { nil }
+
+    var displayName: String { vaultIdentity }
+    var displaySubtitle: String? { nil }
 
     func readText(at relativePath: String) async throws -> String {
         let data = try await readData(at: relativePath)

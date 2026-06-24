@@ -21,6 +21,13 @@ public struct LocalFileSystem: VaultFileSystem {
     /// indexer used as `VaultIndex.vaultId` before the abstraction.
     public var vaultIdentity: String { root.path }
 
+    public var displayName: String {
+        let last = root.lastPathComponent
+        return last.isEmpty ? root.path : last
+    }
+
+    public var displaySubtitle: String? { root.path }
+
     // MARK: - Path resolution + containment
 
     /// Resolves a vault-relative, "/"-separated path to an absolute URL under `root`,

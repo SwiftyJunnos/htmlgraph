@@ -17,6 +17,21 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertEqual(appState.securityPolicy, VaultSecurityPolicy(mode: .safe, allowsNetworkAccess: false))
     }
 
+    func testRemoteVaultDrivesDisplayNamePathAndButtonTitle() {
+        let appState = AppState()
+        let remote = SFTPFileSystem(
+            host: "example.com", port: 22, username: "alice",
+            credential: .password("pw"), remotePath: "/home/alice/vault")
+        // Simulate an open remote vault: a session FS but no local vaultURL.
+        appState.vaultFileSystem = remote
+
+        XCTAssertTrue(appState.isRemoteVault)
+        XCTAssertNil(appState.vaultURL)
+        XCTAssertEqual(appState.vaultDisplayName, "vault")
+        XCTAssertEqual(appState.vaultDisplayPath, "alice@example.com:/home/alice/vault")
+        XCTAssertEqual(appState.openVaultButtonTitle, "Change Vault")
+    }
+
     // MARK: - Per-vault security persistence
 
     func testSecurityStoreRoundTripsPerPath() {

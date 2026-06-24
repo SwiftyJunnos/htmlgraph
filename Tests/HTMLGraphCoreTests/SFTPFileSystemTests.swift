@@ -25,4 +25,28 @@ final class SFTPFileSystemTests: XCTestCase {
             host: "h", username: "u", credential: .password("p"), remotePath: "/v")
         XCTAssertNil(fs.absolutePath(for: "notes/page.html"))
     }
+
+    func testDisplayNameAndSubtitleForRemoteVault() {
+        let fs = SFTPFileSystem(
+            host: "example.com", port: 22, username: "alice",
+            credential: .password("pw"), remotePath: "/home/alice/vault")
+        XCTAssertEqual(fs.displayName, "vault")
+        // The default SSH port is omitted from the subtitle.
+        XCTAssertEqual(fs.displaySubtitle, "alice@example.com:/home/alice/vault")
+    }
+
+    func testDisplaySubtitleIncludesNonDefaultPort() {
+        let fs = SFTPFileSystem(
+            host: "h", port: 2222, username: "u",
+            credential: .password("p"), remotePath: "/srv/notes")
+        XCTAssertEqual(fs.displayName, "notes")
+        XCTAssertEqual(fs.displaySubtitle, "u@h:2222:/srv/notes")
+    }
+
+    func testDisplayNameFallsBackToHostForRootVault() {
+        let fs = SFTPFileSystem(
+            host: "example.com", username: "u", credential: .password("p"), remotePath: "/")
+        XCTAssertEqual(fs.displayName, "example.com")
+        XCTAssertEqual(fs.displaySubtitle, "u@example.com:/")
+    }
 }
