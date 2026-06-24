@@ -492,6 +492,22 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Opens a remote vault over SSH/SFTP. The read paths (index, search, preview, inbox
+    /// listing) work immediately since the whole session runs through `vaultFileSystem`;
+    /// remote file-op/editor *writes* land with the guard flips (M8c). `vaultURL` is nil for a
+    /// remote vault (no local path) — `isRemoteVault` reflects that for UI gating.
+    func openRemoteVault(host: String, port: Int = 22, username: String, password: String, remotePath: String) {
+        releaseAccess() // drop any local security-scoped claim before switching to remote
+        let fileSystem = SFTPFileSystem(
+            host: host, port: port, username: username,
+            credential: .password(password), remotePath: remotePath)
+        beginSession(fileSystem: fileSystem, displayURL: nil)
+    }
+
+    /// True when the open vault is remote (SFTP) rather than a local folder. Drives UI that
+    /// hides local-only actions (Reveal in Finder, external editor) for remote vaults.
+    var isRemoteVault: Bool { vaultFileSystem != nil && vaultURL == nil }
+
     func removeRecent(_ recent: RecentVault) {
         recentVaults.removeAll { $0.path == recent.path }
         recentsStore.save(recentVaults)

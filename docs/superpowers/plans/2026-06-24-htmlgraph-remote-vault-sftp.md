@@ -198,12 +198,19 @@ Operations the protocol must cover, by call site:
     (local fallback `?? LocalFileSystem(root: vaultURL)` never triggers locally). Security
     settings keyed by `vaultIdentity` (== local path, so behavior-preserving). `vaultURL` kept
     for local display/recents only. Behavior-preserving — 135 tests + xcodebuild green.
-  - **M8b — remote open + UI (NEXT).** `openRemoteVault(...)` building an `SFTPFileSystem` →
-    `beginSession(fileSystem:displayURL: nil)`; change file-op/editor guards from `vaultURL` to
-    `vaultFileSystem` so writes work on remote; a "Connect to Remote…" dialog (host/user/pw/path);
-    password in Keychain; persist remote vaults in recents (generalize `RecentVault`); host-key
-    TOFU (replace `acceptAnything()`); hide local-only UI (Reveal in Finder / external editor)
-    for remote vaults.
+  - ✅ **M8b — remote open entry point (DONE 2026-06-24).** `AppState.openRemoteVault(host:port:
+    username:password:remotePath:)` builds an `SFTPFileSystem` and calls
+    `beginSession(fileSystem:displayURL: nil)` — so the read paths (index / search / preview /
+    inbox listing) run on the remote vault immediately (via M8a). `isRemoteVault` (vaultURL nil +
+    vaultFileSystem set) added for UI gating. Additive, behavior-preserving — 135 tests +
+    xcodebuild green.
+  - **M8c — remote writes + UI (NEXT).** Flip file-op/editor guards from `guard let vaultURL` to
+    `guard let fileSystem = vaultFileSystem` (+ a `reindexCurrentVault()` helper replacing
+    `beginSession(at: vaultURL)`) so remote create/move/rename/trash/duplicate/edit work (~12
+    methods; behavior-preserving for local). A "Connect to Remote…" dialog (host/user/pw/path)
+    wired to a menu, calling `openRemoteVault`. Password in Keychain + persist remote vaults in
+    recents (generalize `RecentVault`). Host-key TOFU (replace `acceptAnything()`). Hide
+    local-only UI (Reveal in Finder / external editor) for remote vaults via `isRemoteVault`.
 
 - **M9 — `SFTPFileSystem` implementation. IN PROGRESS.**
   - ✅ **Citadel added** (`Package.swift` → `orlandos-nl/Citadel` from 0.7.0; resolved to
