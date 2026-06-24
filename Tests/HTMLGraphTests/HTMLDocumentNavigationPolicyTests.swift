@@ -16,6 +16,28 @@ final class HTMLDocumentNavigationPolicyTests: XCTestCase {
         XCTAssertEqual(policy.decision(for: url, isMainFrame: true, isUserInitiated: true), .external(url))
     }
 
+    /// A remote vault drives the same navigation policy with a synthetic "/" root and
+    /// document URLs of the form "/" + relative-id. Classification must still resolve internal
+    /// links to the right relative id, so cross-document navigation works for remote vaults.
+    func testSyntheticRootClassifiesRemoteInternalDocument() {
+        let policy = HTMLDocumentNavigationPolicy(
+            currentDocumentURL: URL(fileURLWithPath: "/index.html"),
+            vaultURL: URL(fileURLWithPath: "/"),
+            knownDocumentIds: ["index.html", "notes/graph.html"],
+            allowsNetworkAccess: false
+        )
+
+        XCTAssertEqual(
+            policy.decision(for: URL(fileURLWithPath: "/notes/graph.html"), isMainFrame: true, isUserInitiated: true),
+            .internalDocument("notes/graph.html")
+        )
+        // The current document re-navigating to itself is allowed (not flagged external).
+        XCTAssertEqual(
+            policy.decision(for: URL(fileURLWithPath: "/index.html"), isMainFrame: true, isUserInitiated: true),
+            .allow
+        )
+    }
+
     func testKnownInternalDocumentSelectsDocument() {
         let policy = makePolicy()
         let url = vaultURL.appendingPathComponent("notes/graph.html")

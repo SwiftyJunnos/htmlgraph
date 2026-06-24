@@ -46,7 +46,7 @@ struct VaultSidebar: View {
         // Vault-wide actions for right-clicking empty sidebar space. Row context menus
         // take precedence over this for their own rows.
         .contextMenu {
-            if appState.vaultURL != nil {
+            if appState.hasOpenVault {
                 Button("New Document…") { SidebarActions.newDocument(inFolder: nil, appState: appState) }
                 Button("New Folder…") { SidebarActions.newFolder(inParent: nil, appState: appState) }
                 Divider()
@@ -228,12 +228,17 @@ private struct DocumentTreeRows: View {
 
 @ViewBuilder @MainActor
 private func documentContextMenu(_ document: DocumentNode, appState: AppState) -> some View {
-    Button("Open in Browser") { SidebarCommands.openInBrowser(absolutePath: document.absolutePath) }
-    Button("Reveal in Finder") { SidebarCommands.reveal(absolutePath: document.absolutePath) }
+    // Finder/browser actions need an on-disk path, which a remote vault has none of.
+    if !appState.isRemoteVault {
+        Button("Open in Browser") { SidebarCommands.openInBrowser(absolutePath: document.absolutePath) }
+        Button("Reveal in Finder") { SidebarCommands.reveal(absolutePath: document.absolutePath) }
+    }
     Menu("Copy") {
         Button("Title") { SidebarCommands.copyToPasteboard(document.title) }
         Button("Relative Path") { SidebarCommands.copyToPasteboard(document.path) }
-        Button("Full Path") { SidebarCommands.copyToPasteboard(document.absolutePath) }
+        if !appState.isRemoteVault {
+            Button("Full Path") { SidebarCommands.copyToPasteboard(document.absolutePath) }
+        }
         Button("As HTML Link") { SidebarCommands.copyToPasteboard(SidebarCommands.htmlLink(for: document)) }
     }
     Divider()
@@ -268,8 +273,10 @@ private func inboxContextMenu(_ item: InboxItem, appState: AppState) -> some Vie
         }
     }
     Divider()
-    Button("Open in Browser") { SidebarCommands.openInBrowser(absolutePath: item.absolutePath) }
-    Button("Reveal in Finder") { SidebarCommands.reveal(absolutePath: item.absolutePath) }
+    if !appState.isRemoteVault {
+        Button("Open in Browser") { SidebarCommands.openInBrowser(absolutePath: item.absolutePath) }
+        Button("Reveal in Finder") { SidebarCommands.reveal(absolutePath: item.absolutePath) }
+    }
     Button("Copy Path") { SidebarCommands.copyToPasteboard(item.path) }
     Divider()
     Button("Move to Trash", role: .destructive) { SidebarActions.deleteInbox(item, appState: appState) }
@@ -284,75 +291,87 @@ private func inboxContextMenu(_ item: InboxItem, appState: AppState) -> some Vie
 @MainActor
 enum SidebarActions {
     static func newDocument(inFolder folder: String?, appState: AppState) {
-        guard EditorGuard.confirmLeavingEditor(appState) else { return }
-        let location = folder.map { "in “\($0)”" } ?? "in the vault root"
-        guard let name = SidebarCommands.promptForName(
-            title: "New Document",
-            message: "Create a new HTML document \(location).",
-            defaultValue: "Untitled",
-            confirmTitle: "Create"
-        ) else { return }
-        appState.createDocument(inFolder: folder, named: name)
+        Task {
+            guard await EditorGuard.confirmLeavingEditor(appState) else { return }
+            let location = folder.map { "in “\($0)”" } ?? "in the vault root"
+            guard let name = SidebarCommands.promptForName(
+                title: "New Document",
+                message: "Create a new HTML document \(location).",
+                defaultValue: "Untitled",
+                confirmTitle: "Create"
+            ) else { return }
+            await appState.createDocument(inFolder: folder, named: name)
+        }
     }
 
     static func newFolder(inParent parent: String?, appState: AppState) {
-        guard EditorGuard.confirmLeavingEditor(appState) else { return }
-        let location = parent.map { "inside “\($0)”" } ?? "in the vault root"
-        guard let name = SidebarCommands.promptForName(
-            title: "New Folder",
-            message: "Create a new folder \(location).",
-            defaultValue: "New Folder",
-            confirmTitle: "Create"
-        ) else { return }
-        appState.createFolder(named: name, inParent: parent)
+        Task {
+            guard await EditorGuard.confirmLeavingEditor(appState) else { return }
+            let location = parent.map { "inside “\($0)”" } ?? "in the vault root"
+            guard let name = SidebarCommands.promptForName(
+                title: "New Folder",
+                message: "Create a new folder \(location).",
+                defaultValue: "New Folder",
+                confirmTitle: "Create"
+            ) else { return }
+            await appState.createFolder(named: name, inParent: parent)
+        }
     }
 
     static func duplicate(_ document: DocumentNode, appState: AppState) {
-        guard EditorGuard.confirmLeavingEditor(appState) else { return }
-        appState.duplicateDocument(document)
+        Task {
+            guard await EditorGuard.confirmLeavingEditor(appState) else { return }
+            await appState.duplicateDocument(document)
+        }
     }
 
     static func rename(_ document: DocumentNode, appState: AppState) {
-        guard EditorGuard.confirmLeavingEditor(appState) else { return }
-        let count = appState.backlinkCount(forDocument: document.id)
-        let warning = count > 0
-            ? "\n\n⚠️ \(count) \(documentsWord(count)) link to this file. Renaming it will break those links."
-            : ""
-        guard let name = SidebarCommands.promptForName(
-            title: "Rename Document",
-            message: "Enter a new name for “\(document.title)”." + warning,
-            defaultValue: ((document.path as NSString).lastPathComponent as NSString).deletingPathExtension,
-            confirmTitle: "Rename"
-        ) else { return }
-        appState.renameDocument(document, to: name)
+        Task {
+            guard await EditorGuard.confirmLeavingEditor(appState) else { return }
+            let count = appState.backlinkCount(forDocument: document.id)
+            let warning = count > 0
+                ? "\n\n⚠️ \(count) \(documentsWord(count)) link to this file. Renaming it will break those links."
+                : ""
+            guard let name = SidebarCommands.promptForName(
+                title: "Rename Document",
+                message: "Enter a new name for “\(document.title)”." + warning,
+                defaultValue: ((document.path as NSString).lastPathComponent as NSString).deletingPathExtension,
+                confirmTitle: "Rename"
+            ) else { return }
+            await appState.renameDocument(document, to: name)
+        }
     }
 
     static func move(_ document: DocumentNode, to folder: String?, appState: AppState) {
-        guard EditorGuard.confirmLeavingEditor(appState) else { return }
-        let count = appState.backlinkCount(forDocument: document.id)
-        if count > 0 {
-            let destination = folder ?? "the vault root"
-            guard SidebarCommands.confirmDestructive(
-                title: "Move will break links",
-                message: "Moving “\(document.title)” to \(destination) will break \(count) inbound \(linkWord(count)).",
-                confirmTitle: "Move"
-            ) else { return }
+        Task {
+            guard await EditorGuard.confirmLeavingEditor(appState) else { return }
+            let count = appState.backlinkCount(forDocument: document.id)
+            if count > 0 {
+                let destination = folder ?? "the vault root"
+                guard SidebarCommands.confirmDestructive(
+                    title: "Move will break links",
+                    message: "Moving “\(document.title)” to \(destination) will break \(count) inbound \(linkWord(count)).",
+                    confirmTitle: "Move"
+                ) else { return }
+            }
+            await appState.moveDocument(document, toFolder: folder)
         }
-        appState.moveDocument(document, toFolder: folder)
     }
 
     static func delete(_ document: DocumentNode, appState: AppState) {
-        guard EditorGuard.confirmLeavingEditor(appState) else { return }
-        let count = appState.backlinkCount(forDocument: document.id)
-        let extra = count > 0
-            ? " \(count) \(documentsWord(count)) link to it — those links will break."
-            : ""
-        guard SidebarCommands.confirmDestructive(
-            title: "Move to Trash?",
-            message: "“\(document.title)” will be moved to the Trash.\(extra)",
-            confirmTitle: "Move to Trash"
-        ) else { return }
-        appState.trashDocument(document)
+        Task {
+            guard await EditorGuard.confirmLeavingEditor(appState) else { return }
+            let count = appState.backlinkCount(forDocument: document.id)
+            let extra = count > 0
+                ? " \(count) \(documentsWord(count)) link to it — those links will break."
+                : ""
+            guard SidebarCommands.confirmDestructive(
+                title: "Move to Trash?",
+                message: "“\(document.title)” will be moved to the Trash.\(extra)",
+                confirmTitle: "Move to Trash"
+            ) else { return }
+            await appState.trashDocument(document)
+        }
     }
 
     /// Files an unfiled inbox item into the vault. Guarded because `addToVault` accepts the
@@ -361,8 +380,10 @@ enum SidebarActions {
     /// first. Inbox menus can fire without changing the sidebar selection, so the
     /// selection-change guard doesn't cover them.
     static func addToVault(_ item: InboxItem, folder: String?, appState: AppState) {
-        guard EditorGuard.confirmLeavingEditor(appState) else { return }
-        appState.addToVault(item, folder: folder)
+        Task {
+            guard await EditorGuard.confirmLeavingEditor(appState) else { return }
+            await appState.addToVault(item, folder: folder)
+        }
     }
 
     static func deleteInbox(_ item: InboxItem, appState: AppState) {
@@ -371,7 +392,7 @@ enum SidebarActions {
             message: "“\(item.title)” will be moved to the Trash.",
             confirmTitle: "Move to Trash"
         ) else { return }
-        appState.trashInboxItem(item)
+        Task { await appState.trashInboxItem(item) }
     }
 
     private static func documentsWord(_ count: Int) -> String {

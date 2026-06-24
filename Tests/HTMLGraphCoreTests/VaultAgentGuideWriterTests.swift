@@ -2,11 +2,11 @@ import XCTest
 @testable import HTMLGraphCore
 
 final class VaultAgentGuideWriterTests: XCTestCase {
-    func testWritesBothFilesWhenMissing() throws {
+    func testWritesBothFilesWhenMissing() async throws {
         let vaultURL = makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: vaultURL) }
 
-        let outcome = try VaultAgentGuideWriter().writeIfMissing(vaultURL: vaultURL)
+        let outcome = try await VaultAgentGuideWriter().writeIfMissing(vaultURL: vaultURL)
 
         XCTAssertEqual(outcome, .init(wroteAgents: true, wroteClaude: true))
         XCTAssertTrue(outcome.createdAny)
@@ -28,7 +28,7 @@ final class VaultAgentGuideWriterTests: XCTestCase {
         XCTAssertEqual(claude.deletingLastPathComponent().standardizedFileURL, vaultURL.standardizedFileURL)
     }
 
-    func testCreateOnlyDoesNotOverwriteExistingFiles() throws {
+    func testCreateOnlyDoesNotOverwriteExistingFiles() async throws {
         let vaultURL = makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let writer = VaultAgentGuideWriter()
@@ -37,7 +37,7 @@ final class VaultAgentGuideWriterTests: XCTestCase {
         try custom.write(to: VaultAgentGuideWriter.agentsFileURL(forVault: vaultURL), atomically: true, encoding: .utf8)
         try custom.write(to: VaultAgentGuideWriter.claudeFileURL(forVault: vaultURL), atomically: true, encoding: .utf8)
 
-        let outcome = try writer.writeIfMissing(vaultURL: vaultURL)
+        let outcome = try await writer.writeIfMissing(vaultURL: vaultURL)
 
         XCTAssertEqual(outcome, .init(wroteAgents: false, wroteClaude: false))
         XCTAssertFalse(outcome.createdAny)
@@ -45,7 +45,7 @@ final class VaultAgentGuideWriterTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: VaultAgentGuideWriter.claudeFileURL(forVault: vaultURL), encoding: .utf8), custom)
     }
 
-    func testCreateOnlyFillsMissingFileWithoutTouchingTheOther() throws {
+    func testCreateOnlyFillsMissingFileWithoutTouchingTheOther() async throws {
         let vaultURL = makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let writer = VaultAgentGuideWriter()
@@ -54,7 +54,7 @@ final class VaultAgentGuideWriterTests: XCTestCase {
         let custom = "# hand written claude file\n"
         try custom.write(to: VaultAgentGuideWriter.claudeFileURL(forVault: vaultURL), atomically: true, encoding: .utf8)
 
-        let outcome = try writer.writeIfMissing(vaultURL: vaultURL)
+        let outcome = try await writer.writeIfMissing(vaultURL: vaultURL)
 
         XCTAssertEqual(outcome, .init(wroteAgents: true, wroteClaude: false))
         XCTAssertTrue(FileManager.default.fileExists(
@@ -62,7 +62,7 @@ final class VaultAgentGuideWriterTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: VaultAgentGuideWriter.claudeFileURL(forVault: vaultURL), encoding: .utf8), custom)
     }
 
-    func testRegenerateOverwritesExistingFiles() throws {
+    func testRegenerateOverwritesExistingFiles() async throws {
         let vaultURL = makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let writer = VaultAgentGuideWriter()
@@ -71,7 +71,7 @@ final class VaultAgentGuideWriterTests: XCTestCase {
         try stale.write(to: VaultAgentGuideWriter.agentsFileURL(forVault: vaultURL), atomically: true, encoding: .utf8)
         try stale.write(to: VaultAgentGuideWriter.claudeFileURL(forVault: vaultURL), atomically: true, encoding: .utf8)
 
-        let outcome = try writer.regenerate(vaultURL: vaultURL)
+        let outcome = try await writer.regenerate(vaultURL: vaultURL)
 
         XCTAssertEqual(outcome, .init(wroteAgents: true, wroteClaude: true))
         let agents = try String(contentsOf: VaultAgentGuideWriter.agentsFileURL(forVault: vaultURL), encoding: .utf8)
@@ -81,34 +81,34 @@ final class VaultAgentGuideWriterTests: XCTestCase {
         XCTAssertTrue(agents.contains("HTMLGraph vault"))
     }
 
-    func testRegenerationIsDeterministic() throws {
+    func testRegenerationIsDeterministic() async throws {
         let vaultURL = makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let writer = VaultAgentGuideWriter()
 
-        try writer.regenerate(vaultURL: vaultURL)
+        try await writer.regenerate(vaultURL: vaultURL)
         let first = try String(contentsOf: VaultAgentGuideWriter.agentsFileURL(forVault: vaultURL), encoding: .utf8)
-        try writer.regenerate(vaultURL: vaultURL)
+        try await writer.regenerate(vaultURL: vaultURL)
         let second = try String(contentsOf: VaultAgentGuideWriter.agentsFileURL(forVault: vaultURL), encoding: .utf8)
 
         XCTAssertEqual(first, second, "regeneration must be byte-stable")
     }
 
-    func testClaudePointerImportsAgentsGuide() throws {
+    func testClaudePointerImportsAgentsGuide() async throws {
         let vaultURL = makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: vaultURL) }
 
-        try VaultAgentGuideWriter().writeIfMissing(vaultURL: vaultURL)
+        try await VaultAgentGuideWriter().writeIfMissing(vaultURL: vaultURL)
         let claude = try String(contentsOf: VaultAgentGuideWriter.claudeFileURL(forVault: vaultURL), encoding: .utf8)
 
         XCTAssertTrue(claude.contains("@AGENTS.md"), "CLAUDE.md must import AGENTS.md: \(claude)")
     }
 
-    func testAgentsGuideCoversKeyConventions() throws {
+    func testAgentsGuideCoversKeyConventions() async throws {
         let vaultURL = makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: vaultURL) }
 
-        try VaultAgentGuideWriter().writeIfMissing(vaultURL: vaultURL)
+        try await VaultAgentGuideWriter().writeIfMissing(vaultURL: vaultURL)
         let agents = try String(contentsOf: VaultAgentGuideWriter.agentsFileURL(forVault: vaultURL), encoding: .utf8)
 
         for token in ["HTMLGraph vault", ".htmlgraph", "graph.json", "Inbox", "Safe mode", "AGENTS.md"] {

@@ -2,7 +2,7 @@ import XCTest
 @testable import HTMLGraphCore
 
 final class VaultStaticSiteExporterTests: XCTestCase {
-    func testExportsCatalogAndPublicVaultFiles() throws {
+    func testExportsCatalogAndPublicVaultFiles() async throws {
         let vaultURL = makeTemporaryDirectory("Vault")
         let outputURL = makeTemporaryDirectory("Export")
         let secretURL = makeTemporaryDirectory("Secret").appendingPathComponent("secret.txt")
@@ -25,7 +25,7 @@ final class VaultStaticSiteExporterTests: XCTestCase {
             withDestinationURL: secretURL
         )
 
-        let index = try VaultIndexer().indexVault(at: vaultURL)
+        let index = try await VaultIndexer().indexVault(at: vaultURL)
         try VaultStaticSiteExporter().export(index: index, vaultURL: vaultURL, to: outputURL)
 
         XCTAssertTrue(exists(outputURL.appendingPathComponent("index.html")))
@@ -45,7 +45,7 @@ final class VaultStaticSiteExporterTests: XCTestCase {
         XCTAssertTrue(catalog.contains("A &amp; B"), catalog)
     }
 
-    func testRejectsNonEmptyNonExportDestination() throws {
+    func testRejectsNonEmptyNonExportDestination() async throws {
         let vaultURL = makeTemporaryDirectory("Vault")
         let outputURL = makeTemporaryDirectory("Export")
         defer {
@@ -55,7 +55,7 @@ final class VaultStaticSiteExporterTests: XCTestCase {
 
         try write("<html><head><title>Home</title></head></html>", to: vaultURL.appendingPathComponent("index.html"))
         try write("keep", to: outputURL.appendingPathComponent("other.txt"))
-        let index = try VaultIndexer().indexVault(at: vaultURL)
+        let index = try await VaultIndexer().indexVault(at: vaultURL)
 
         XCTAssertThrowsError(try VaultStaticSiteExporter().export(index: index, vaultURL: vaultURL, to: outputURL)) { error in
             XCTAssertEqual(error as? VaultStaticSiteExportError, .destinationNotEmpty)
@@ -63,7 +63,7 @@ final class VaultStaticSiteExporterTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: outputURL.appendingPathComponent("other.txt"), encoding: .utf8), "keep")
     }
 
-    func testReusesExistingExportDestination() throws {
+    func testReusesExistingExportDestination() async throws {
         let vaultURL = makeTemporaryDirectory("Vault")
         let outputURL = makeTemporaryDirectory("Export")
         defer {
@@ -72,7 +72,7 @@ final class VaultStaticSiteExporterTests: XCTestCase {
         }
 
         try write("<html><head><title>Home</title></head></html>", to: vaultURL.appendingPathComponent("index.html"))
-        let index = try VaultIndexer().indexVault(at: vaultURL)
+        let index = try await VaultIndexer().indexVault(at: vaultURL)
         let exporter = VaultStaticSiteExporter()
 
         try exporter.export(index: index, vaultURL: vaultURL, to: outputURL)
@@ -83,12 +83,12 @@ final class VaultStaticSiteExporterTests: XCTestCase {
         XCTAssertFalse(exists(outputURL.appendingPathComponent("vault/stale.txt")))
     }
 
-    func testRejectsDestinationInsideVault() throws {
+    func testRejectsDestinationInsideVault() async throws {
         let vaultURL = makeTemporaryDirectory("Vault")
         defer { try? FileManager.default.removeItem(at: vaultURL) }
 
         try write("<html><head><title>Home</title></head></html>", to: vaultURL.appendingPathComponent("index.html"))
-        let index = try VaultIndexer().indexVault(at: vaultURL)
+        let index = try await VaultIndexer().indexVault(at: vaultURL)
 
         XCTAssertThrowsError(
             try VaultStaticSiteExporter().export(

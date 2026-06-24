@@ -2,11 +2,11 @@ import XCTest
 @testable import HTMLGraphCore
 
 final class VaultIndexExporterTests: XCTestCase {
-    func testWritesStablyNamedGraphJSON() throws {
+    func testWritesStablyNamedGraphJSON() async throws {
         let vaultURL = makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: vaultURL) }
 
-        let written = try VaultIndexExporter().export(
+        let written = try await VaultIndexExporter().export(
             makeIndex(vaultId: vaultURL.path, lastIndexedAt: Date(timeIntervalSince1970: 1.234567)),
             vaultURL: vaultURL
         )
@@ -17,14 +17,14 @@ final class VaultIndexExporterTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: written.path))
     }
 
-    func testRoundTripsDecodeEqual() throws {
+    func testRoundTripsDecodeEqual() async throws {
         let vaultURL = makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         // Millisecond-aligned dates so the interoperable (RFC 3339 ms) encoding
         // round-trips exactly and `decoded.index == index` holds.
         let index = makeIndex(vaultId: vaultURL.path, lastIndexedAt: Date(timeIntervalSince1970: 1_717_171_717))
 
-        let written = try VaultIndexExporter().export(index, vaultURL: vaultURL)
+        let written = try await VaultIndexExporter().export(index, vaultURL: vaultURL)
         let data = try Data(contentsOf: written)
         let decoded = try VaultIndexJSON.decoder.decode(ExportedGraph.self, from: data)
 
@@ -32,11 +32,11 @@ final class VaultIndexExporterTests: XCTestCase {
         XCTAssertEqual(decoded.index, index)
     }
 
-    func testSchemaVersionIsTopLevelSiblingOfGraphFields() throws {
+    func testSchemaVersionIsTopLevelSiblingOfGraphFields() async throws {
         let vaultURL = makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: vaultURL) }
 
-        let written = try VaultIndexExporter().export(
+        let written = try await VaultIndexExporter().export(
             makeIndex(vaultId: vaultURL.path, lastIndexedAt: Date(timeIntervalSince1970: 1)),
             vaultURL: vaultURL
         )
@@ -49,17 +49,17 @@ final class VaultIndexExporterTests: XCTestCase {
         XCTAssertFalse(json.contains("\"index\" :"), json)
     }
 
-    func testReExportAtomicallyReplacesPreviousGraph() throws {
+    func testReExportAtomicallyReplacesPreviousGraph() async throws {
         let vaultURL = makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let exporter = VaultIndexExporter()
 
-        try exporter.export(
+        try await exporter.export(
             makeIndex(vaultId: "first", lastIndexedAt: Date(timeIntervalSince1970: 1)),
             vaultURL: vaultURL
         )
         let second = makeIndex(vaultId: "second", lastIndexedAt: Date(timeIntervalSince1970: 2))
-        let written = try exporter.export(second, vaultURL: vaultURL)
+        let written = try await exporter.export(second, vaultURL: vaultURL)
 
         let sidecarContents = try FileManager.default.contentsOfDirectory(
             at: VaultIndexExporter.sidecarDirectory(forVault: vaultURL),
@@ -71,13 +71,13 @@ final class VaultIndexExporterTests: XCTestCase {
         XCTAssertEqual(decoded.index, second)
     }
 
-    func testEncodesInteroperableRFC3339Milliseconds() throws {
+    func testEncodesInteroperableRFC3339Milliseconds() async throws {
         let vaultURL = makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let preciseDate = Date(timeIntervalSince1970: 1_717_171_717.123456)
         let index = makeIndex(vaultId: vaultURL.path, lastIndexedAt: preciseDate)
 
-        let written = try VaultIndexExporter().export(index, vaultURL: vaultURL)
+        let written = try await VaultIndexExporter().export(index, vaultURL: vaultURL)
         let json = try String(contentsOf: written, encoding: .utf8)
 
         // Exported timestamps are RFC 3339 with exactly 3 fractional digits — the
@@ -101,12 +101,12 @@ final class VaultIndexExporterTests: XCTestCase {
         )
     }
 
-    func testExportedKeysCoverAllVaultIndexFields() throws {
+    func testExportedKeysCoverAllVaultIndexFields() async throws {
         let vaultURL = makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let index = makeIndex(vaultId: vaultURL.path, lastIndexedAt: Date(timeIntervalSince1970: 1))
 
-        let written = try VaultIndexExporter().export(index, vaultURL: vaultURL)
+        let written = try await VaultIndexExporter().export(index, vaultURL: vaultURL)
         let object = try JSONSerialization.jsonObject(with: Data(contentsOf: written)) as? [String: Any]
         let jsonKeys = Set((object ?? [:]).keys)
 

@@ -17,6 +17,21 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertEqual(appState.securityPolicy, VaultSecurityPolicy(mode: .safe, allowsNetworkAccess: false))
     }
 
+    func testRemoteVaultDrivesDisplayNamePathAndButtonTitle() {
+        let appState = AppState()
+        let remote = SFTPFileSystem(
+            host: "example.com", port: 22, username: "alice",
+            credential: .password("pw"), remotePath: "/home/alice/vault")
+        // Simulate an open remote vault: a session FS but no local vaultURL.
+        appState.vaultFileSystem = remote
+
+        XCTAssertTrue(appState.isRemoteVault)
+        XCTAssertNil(appState.vaultURL)
+        XCTAssertEqual(appState.vaultDisplayName, "vault")
+        XCTAssertEqual(appState.vaultDisplayPath, "alice@example.com:/home/alice/vault")
+        XCTAssertEqual(appState.openVaultButtonTitle, "Change Vault")
+    }
+
     // MARK: - Per-vault security persistence
 
     func testSecurityStoreRoundTripsPerPath() {
@@ -46,6 +61,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         let appState = AppState(securityStore: store)
         let url = URL(fileURLWithPath: "/tmp/vaultX", isDirectory: true)
         appState.vaultURL = url
+        appState.vaultFileSystem = LocalFileSystem(root: url)
 
         appState.trustMode = .trusted
         appState.allowsNetworkAccess = true
@@ -164,6 +180,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertEqual(appState.vaultStatusText, "No vault open")
 
         appState.vaultURL = URL(fileURLWithPath: "/Users/test/Documents/sample-vault", isDirectory: true)
+        appState.vaultFileSystem = LocalFileSystem(root: URL(fileURLWithPath: "/Users/test/Documents/sample-vault", isDirectory: true))
         appState.isIndexing = true
 
         XCTAssertEqual(appState.openVaultButtonTitle, "Change Vault")
@@ -201,15 +218,16 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertEqual(appState.vaultStatusText, "2 documents")
     }
 
-    func testRefreshInboxLoadsPendingInboxItems() throws {
+    func testRefreshInboxLoadsPendingInboxItems() async throws {
         let vaultURL = try makeTemporaryVault(files: [
             "Inbox/idea.html": "<html><head><title>AI Idea</title></head><body></body></html>"
         ])
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let appState = AppState()
         appState.vaultURL = vaultURL
+        appState.vaultFileSystem = LocalFileSystem(root: vaultURL)
 
-        try appState.refreshInbox()
+        try await appState.refreshInbox()
 
         XCTAssertEqual(appState.inboxItems.map(\.path), ["Inbox/idea.html"])
         XCTAssertEqual(appState.selectedInboxItem?.title, nil)
@@ -219,18 +237,19 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertNil(appState.selectedDocumentId)
     }
 
-    func testAcceptInboxItemMovesFileRefreshesInboxAndStartsReindexing() throws {
+    func testAcceptInboxItemMovesFileRefreshesInboxAndStartsReindexing() async throws {
         let vaultURL = try makeTemporaryVault(files: [
             "Inbox/idea.html": "<html><head><title>AI Idea</title></head><body></body></html>"
         ])
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let appState = AppState()
         appState.vaultURL = vaultURL
-        try appState.refreshInbox()
+        appState.vaultFileSystem = LocalFileSystem(root: vaultURL)
+        try await appState.refreshInbox()
         let item = try XCTUnwrap(appState.inboxItems.first)
 
         let destinationURL = vaultURL.appendingPathComponent("Notes/idea.html")
-        try appState.acceptInboxItem(item, to: destinationURL)
+        try await appState.acceptInboxItem(item, to: destinationURL)
 
         XCTAssertEqual(appState.inboxItems, [])
         XCTAssertNil(appState.selectedInboxItemId)
@@ -238,17 +257,18 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertTrue(appState.isIndexing || appState.index?.document(id: "Notes/idea.html") != nil)
     }
 
-    func testAddToVaultFilesItemToRootAndRemovesItFromInbox() throws {
+    func testAddToVaultFilesItemToRootAndRemovesItFromInbox() async throws {
         let vaultURL = try makeTemporaryVault(files: [
             "Inbox/draft.html": "<html><head><title>Draft</title></head><body></body></html>"
         ])
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let appState = AppState()
         appState.vaultURL = vaultURL
-        try appState.refreshInbox()
+        appState.vaultFileSystem = LocalFileSystem(root: vaultURL)
+        try await appState.refreshInbox()
         let item = try XCTUnwrap(appState.inboxItems.first)
 
-        appState.addToVault(item, folder: nil)
+        await appState.addToVault(item, folder: nil)
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: vaultURL.appendingPathComponent("draft.html").path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: vaultURL.appendingPathComponent("Inbox/draft.html").path))
@@ -256,7 +276,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertNil(appState.errorMessage)
     }
 
-    func testVaultFoldersListsDistinctDocumentFoldersExcludingRoot() throws {
+    func testVaultFoldersListsDistinctDocumentFoldersExcludingRoot() async throws {
         let html = "<html><head><title>T</title></head><body></body></html>"
         let vaultURL = try makeTemporaryVault(files: [
             "index.html": html,
@@ -266,12 +286,12 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         ])
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let appState = AppState()
-        appState.index = try VaultIndexer().indexVault(at: vaultURL)
+        appState.index = try await VaultIndexer().indexVault(at: vaultURL)
 
         XCTAssertEqual(appState.vaultFolders, ["concepts", "guides"])
     }
 
-    func testDocumentTreeBuildsFolderHierarchyFoldersBeforeDocuments() throws {
+    func testDocumentTreeBuildsFolderHierarchyFoldersBeforeDocuments() async throws {
         let html = { (title: String) in "<html><head><title>\(title)</title></head><body></body></html>" }
         let vaultURL = try makeTemporaryVault(files: [
             "index.html": html("Home"),
@@ -280,7 +300,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
             "guides/start.html": html("Start")
         ])
         defer { try? FileManager.default.removeItem(at: vaultURL) }
-        let index = try VaultIndexer().indexVault(at: vaultURL)
+        let index = try await VaultIndexer().indexVault(at: vaultURL)
 
         let tree = DocumentTreeBuilder.build(from: index.documents)
 
@@ -292,13 +312,14 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertTrue(tree[2].children.isEmpty)
     }
 
-    func testCreateDocumentForUnresolvedWritesStubHtml() throws {
+    func testCreateDocumentForUnresolvedWritesStubHtml() async throws {
         let vaultURL = try makeTemporaryVault(files: [
             "index.html": "<html><head><title>Home</title></head><body></body></html>"
         ])
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let appState = AppState()
         appState.vaultURL = vaultURL
+        appState.vaultFileSystem = LocalFileSystem(root: vaultURL)
 
         let edge = LinkEdge(
             id: "index.html#link-0",
@@ -311,7 +332,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
             status: .unresolved
         )
 
-        appState.createDocument(forUnresolved: edge)
+        await appState.createDocument(forUnresolved: edge)
 
         let created = vaultURL.appendingPathComponent("concepts/new-note.html")
         XCTAssertTrue(FileManager.default.fileExists(atPath: created.path))
@@ -321,13 +342,14 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertNil(appState.errorMessage)
     }
 
-    func testCreateDocumentIgnoresNonHtmlTarget() throws {
+    func testCreateDocumentIgnoresNonHtmlTarget() async throws {
         let vaultURL = try makeTemporaryVault(files: [
             "index.html": "<html><head><title>Home</title></head><body></body></html>"
         ])
         defer { try? FileManager.default.removeItem(at: vaultURL) }
         let appState = AppState()
         appState.vaultURL = vaultURL
+        appState.vaultFileSystem = LocalFileSystem(root: vaultURL)
 
         let edge = LinkEdge(
             id: "index.html#link-0",
@@ -340,7 +362,7 @@ final class AppStateSecurityPolicyTests: XCTestCase {
             status: .unresolved
         )
 
-        appState.createDocument(forUnresolved: edge)
+        await appState.createDocument(forUnresolved: edge)
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: vaultURL.appendingPathComponent("notes.txt").path))
     }

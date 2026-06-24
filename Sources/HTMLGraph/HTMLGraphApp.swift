@@ -24,7 +24,7 @@ struct HTMLGraphApp: App {
                     // unsaved editor edits before the process terminates.
                     appDelegate.appState = appState
                     if autoReopenLastVault,
-                       appState.vaultURL == nil,
+                       !appState.hasOpenVault,
                        let mostRecent = appState.recentVaults.first {
                         appState.openRecent(mostRecent, isAutomatic: true)
                     }
@@ -40,10 +40,20 @@ struct HTMLGraphApp: App {
 
             CommandGroup(replacing: .newItem) {
                 Button("Open Vault...") {
-                    guard EditorGuard.confirmLeavingEditor(appState) else { return }
-                    appState.chooseAndOpenVault()
+                    Task {
+                        guard await EditorGuard.confirmLeavingEditor(appState) else { return }
+                        appState.chooseAndOpenVault()
+                    }
                 }
                 .keyboardShortcut("o", modifiers: .command)
+
+                Button("Connect to Remote…") {
+                    Task {
+                        guard await EditorGuard.confirmLeavingEditor(appState) else { return }
+                        appState.isShowingRemoteConnect = true
+                    }
+                }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
 
                 Button("Global Graph") {
                     openWindow(id: "global-graph")
@@ -55,8 +65,10 @@ struct HTMLGraphApp: App {
                 Menu("Open Recent") {
                     ForEach(appState.recentVaults) { recent in
                         Button(recent.displayName) {
-                            guard EditorGuard.confirmLeavingEditor(appState) else { return }
-                            appState.openRecent(recent)
+                            Task {
+                                guard await EditorGuard.confirmLeavingEditor(appState) else { return }
+                                appState.openRecent(recent)
+                            }
                         }
                     }
                     if !appState.recentVaults.isEmpty {
@@ -84,7 +96,7 @@ struct HTMLGraphApp: App {
                     guard alert.runModal() == .alertFirstButtonReturn else { return }
                     appState.regenerateAgentGuide()
                 }
-                .disabled(appState.vaultURL == nil)
+                .disabled(!appState.hasOpenVault)
             }
         }
 
@@ -104,8 +116,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let appState else { return .terminateNow }
         // The delegate is always called on the main thread; AppState is @MainActor.
-        return MainActor.assumeIsolated {
-            EditorGuard.confirmLeavingEditor(appState) ? .terminateNow : .terminateCancel
+        // Fast path: nothing unsaved → terminate now. Otherwise the confirm/save flow is
+        // async, so reply via terminateLater once it resolves.
+        let hasUnsaved = MainActor.assumeIsolated { appState.hasUnsavedEdits }
+        guard hasUnsaved else { return .terminateNow }
+        Task { @MainActor in
+            let canTerminate = await EditorGuard.confirmLeavingEditor(appState)
+            sender.reply(toApplicationShouldTerminate: canTerminate)
         }
+        return .terminateLater
     }
 }

@@ -12,13 +12,15 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.3"),
-        .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.8.8")
+        .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.8.8"),
+        .package(url: "https://github.com/orlandos-nl/Citadel.git", from: "0.7.0")
     ],
     targets: [
         .target(
             name: "HTMLGraphCore",
             dependencies: [
-                .product(name: "SwiftSoup", package: "SwiftSoup")
+                .product(name: "SwiftSoup", package: "SwiftSoup"),
+                .product(name: "Citadel", package: "Citadel")
             ]
         ),
         .executableTarget(

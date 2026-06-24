@@ -26,44 +26,50 @@ final class VaultEmbeddingStoreTests: XCTestCase {
         XCTAssertNil(VaultEmbeddingStore.decodeVector(encoded, dimension: 4))
     }
 
-    func testSaveThenLoadRoundTrips() throws {
+    func testSaveThenLoadRoundTrips() async throws {
         let store = VaultEmbeddingStore()
+        let fileSystem = LocalFileSystem(root: vaultURL)
         let records = [
             "doc-a": EmbeddingRecord(contentHash: "hash-a", vector: [1, 0, 0, 0]),
             "doc-b": EmbeddingRecord(contentHash: "hash-b", vector: [0, 1, 0, 0]),
         ]
-        try store.save(records, providerId: "p.v1", dimension: 4, vaultURL: vaultURL)
+        try await store.save(records, providerId: "p.v1", dimension: 4, fileSystem: fileSystem)
 
-        let loaded = store.load(providerId: "p.v1", dimension: 4, vaultURL: vaultURL)
+        let loaded = await store.load(providerId: "p.v1", dimension: 4, fileSystem: fileSystem)
         XCTAssertEqual(loaded, records)
     }
 
-    func testWritesToHiddenSidecarPath() throws {
+    func testWritesToHiddenSidecarPath() async throws {
         let store = VaultEmbeddingStore()
-        try store.save(["d": EmbeddingRecord(contentHash: "h", vector: [1, 0])],
-                       providerId: "p", dimension: 2, vaultURL: vaultURL)
+        try await store.save(["d": EmbeddingRecord(contentHash: "h", vector: [1, 0])],
+                             providerId: "p", dimension: 2, fileSystem: LocalFileSystem(root: vaultURL))
         let expected = vaultURL
             .appendingPathComponent(".htmlgraph", isDirectory: true)
             .appendingPathComponent("embeddings.json")
         XCTAssertTrue(FileManager.default.fileExists(atPath: expected.path))
     }
 
-    func testProviderIdMismatchDiscardsCache() throws {
+    func testProviderIdMismatchDiscardsCache() async throws {
         let store = VaultEmbeddingStore()
-        try store.save(["d": EmbeddingRecord(contentHash: "h", vector: [1, 0])],
-                       providerId: "old.v1", dimension: 2, vaultURL: vaultURL)
-        XCTAssertNil(store.load(providerId: "new.v2", dimension: 2, vaultURL: vaultURL))
+        let fileSystem = LocalFileSystem(root: vaultURL)
+        try await store.save(["d": EmbeddingRecord(contentHash: "h", vector: [1, 0])],
+                             providerId: "old.v1", dimension: 2, fileSystem: fileSystem)
+        let loaded = await store.load(providerId: "new.v2", dimension: 2, fileSystem: fileSystem)
+        XCTAssertNil(loaded)
     }
 
-    func testDimensionMismatchDiscardsCache() throws {
+    func testDimensionMismatchDiscardsCache() async throws {
         let store = VaultEmbeddingStore()
-        try store.save(["d": EmbeddingRecord(contentHash: "h", vector: [1, 0])],
-                       providerId: "p", dimension: 2, vaultURL: vaultURL)
-        XCTAssertNil(store.load(providerId: "p", dimension: 512, vaultURL: vaultURL))
+        let fileSystem = LocalFileSystem(root: vaultURL)
+        try await store.save(["d": EmbeddingRecord(contentHash: "h", vector: [1, 0])],
+                             providerId: "p", dimension: 2, fileSystem: fileSystem)
+        let loaded = await store.load(providerId: "p", dimension: 512, fileSystem: fileSystem)
+        XCTAssertNil(loaded)
     }
 
-    func testLoadMissingFileReturnsNil() {
+    func testLoadMissingFileReturnsNil() async {
         let store = VaultEmbeddingStore()
-        XCTAssertNil(store.load(providerId: "p", dimension: 2, vaultURL: vaultURL))
+        let loaded = await store.load(providerId: "p", dimension: 2, fileSystem: LocalFileSystem(root: vaultURL))
+        XCTAssertNil(loaded)
     }
 }

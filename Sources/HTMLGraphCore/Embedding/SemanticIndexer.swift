@@ -44,13 +44,13 @@ public struct SemanticIndexer: Sendable {
     private let provider: EmbeddingProvider
     private let store: VaultEmbeddingStore
     private let maxCharsPerChunk: Int
-    private let bodyTextLoader: @Sendable (DocumentNode) throws -> String
+    private let bodyTextLoader: @Sendable (DocumentNode, VaultFileSystem) async throws -> String
 
     public init(
         provider: EmbeddingProvider,
         store: VaultEmbeddingStore = VaultEmbeddingStore(),
         maxCharsPerChunk: Int = EmbeddingInput.defaultMaxCharsPerChunk,
-        bodyTextLoader: @escaping @Sendable (DocumentNode) throws -> String = SemanticIndexer.diskBodyTextLoader
+        bodyTextLoader: @escaping @Sendable (DocumentNode, VaultFileSystem) async throws -> String = SemanticIndexer.diskBodyTextLoader
     ) {
         self.provider = provider
         self.store = store
@@ -58,9 +58,11 @@ public struct SemanticIndexer: Sendable {
         self.bodyTextLoader = bodyTextLoader
     }
 
-    /// Default loader: read the document's HTML from disk and extract its body text.
-    public static let diskBodyTextLoader: @Sendable (DocumentNode) throws -> String = { node in
-        let html = try String(contentsOf: URL(fileURLWithPath: node.absolutePath), encoding: .utf8)
+    /// Default loader: read the document's HTML through the vault's file system (by its
+    /// vault-relative `path`) and extract its body text. Routing through `VaultFileSystem`
+    /// rather than `node.absolutePath` is what lets a remote backend embed remote files.
+    public static let diskBodyTextLoader: @Sendable (DocumentNode, VaultFileSystem) async throws -> String = { node, fileSystem in
+        let html = try await fileSystem.readText(at: node.path)
         return try HTMLMetadataExtractor().bodyText(from: html)
     }
 
@@ -69,11 +71,11 @@ public struct SemanticIndexer: Sendable {
     /// Re-embeds changed documents, reuses cached vectors for unchanged ones, prunes
     /// ghosts, persists, and returns the updated in-memory index.
     @discardableResult
-    public func refresh(index: VaultIndex, vaultURL: URL) async throws -> EmbeddingIndex {
-        let cached = store.load(
+    public func refresh(index: VaultIndex, fileSystem: VaultFileSystem) async throws -> EmbeddingIndex {
+        let cached = await store.load(
             providerId: provider.identifier,
             dimension: provider.dimension,
-            vaultURL: vaultURL
+            fileSystem: fileSystem
         ) ?? [:]
 
         var records: [String: EmbeddingRecord] = [:]
@@ -84,16 +86,16 @@ public struct SemanticIndexer: Sendable {
                 records[document.id] = prior // unchanged ⇒ skip the model
                 continue
             }
-            let vector = try await embed(document: document)
+            let vector = try await embed(document: document, fileSystem: fileSystem)
             records[document.id] = EmbeddingRecord(contentHash: document.contentHash, vector: vector)
         }
         // Ghost prune is implicit: `records` only contains current document ids.
 
-        try store.save(
+        try await store.save(
             records,
             providerId: provider.identifier,
             dimension: provider.dimension,
-            vaultURL: vaultURL
+            fileSystem: fileSystem
         )
 
         return EmbeddingIndex(
@@ -106,13 +108,13 @@ public struct SemanticIndexer: Sendable {
     /// Re-embeds exactly one document and returns its record (for the incremental
     /// editor-save hook). Does not touch the store; the caller patches the in-memory
     /// index and persists.
-    public func embedRecord(for document: DocumentNode) async throws -> EmbeddingRecord {
-        let vector = try await embed(document: document)
+    public func embedRecord(for document: DocumentNode, fileSystem: VaultFileSystem) async throws -> EmbeddingRecord {
+        let vector = try await embed(document: document, fileSystem: fileSystem)
         return EmbeddingRecord(contentHash: document.contentHash, vector: vector)
     }
 
-    private func embed(document: DocumentNode) async throws -> [Float] {
-        let body = try bodyTextLoader(document)
+    private func embed(document: DocumentNode, fileSystem: VaultFileSystem) async throws -> [Float] {
+        let body = try await bodyTextLoader(document, fileSystem)
         var chunks = EmbeddingInput.chunks(
             title: document.title,
             bodyText: body,

@@ -10,17 +10,27 @@ import Network
 /// Pure request → response mapping for the loopback vault server. Kept free of
 /// socket I/O so it can be unit-tested directly. It reads files from disk because
 /// serving them with the right MIME type and byte ranges is the entire job.
-struct VaultHTTPResponder {
-    let vaultURL: URL
+struct VaultHTTPResponder: Sendable {
+    let fileSystem: VaultFileSystem
     let token: String
 
-    struct Response: Equatable {
+    init(fileSystem: VaultFileSystem, token: String) {
+        self.fileSystem = fileSystem
+        self.token = token
+    }
+
+    /// Convenience: serve a local vault directory.
+    init(vaultURL: URL, token: String) {
+        self.init(fileSystem: LocalFileSystem(root: vaultURL), token: token)
+    }
+
+    struct Response: Equatable, Sendable {
         var status: Int
         var reason: String
         var headers: [Header]
         var body: Data
 
-        struct Header: Equatable {
+        struct Header: Equatable, Sendable {
             let name: String
             let value: String
             init(_ name: String, _ value: String) {
@@ -34,35 +44,31 @@ struct VaultHTTPResponder {
         }
     }
 
-    /// File serving is policy-independent: `VaultSecurityPolicy.allows` for a file
-    /// URL only checks vault-root containment, so a fixed Safe policy suffices.
-    private static let containmentPolicy = VaultSecurityPolicy(mode: .safe, allowsNetworkAccess: false)
-
-    func respond(method: String, target: String, rangeHeader: String?) -> Response {
+    func respond(method: String, target: String, rangeHeader: String?) async -> Response {
         let upperMethod = method.uppercased()
         guard upperMethod == "GET" || upperMethod == "HEAD" else {
             return Self.status(405, "Method Not Allowed", extra: [.init("Allow", "GET, HEAD")])
         }
 
-        guard let fileURL = Self.fileURL(forTarget: target, vaultURL: vaultURL, token: token) else {
+        guard let relativePath = Self.relativePath(forTarget: target, token: token) else {
             return Self.status(403, "Forbidden")
         }
 
-        let fileManager = FileManager.default
-        var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: fileURL.path, isDirectory: &isDirectory) else {
+        guard let meta = try? await fileSystem.metadata(at: relativePath) else {
             return Self.status(404, "Not Found")
         }
-        let resolvedURL = isDirectory.boolValue ? fileURL.appendingPathComponent("index.html") : fileURL
+        // A directory request serves its index.html (matches the previous behavior).
+        let resolved = meta.isDirectory
+            ? (relativePath.isEmpty ? "index.html" : relativePath + "/index.html")
+            : relativePath
 
-        var resolvedIsDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: resolvedURL.path, isDirectory: &resolvedIsDirectory),
-              !resolvedIsDirectory.boolValue,
-              let size = (try? fileManager.attributesOfItem(atPath: resolvedURL.path))?[.size] as? Int else {
+        guard let resolvedMeta = try? await fileSystem.metadata(at: resolved),
+              resolvedMeta.isRegularFile else {
             return Self.status(404, "Not Found")
         }
+        let size = resolvedMeta.size
 
-        let mime = VaultResourceSchemeHandler.mimeType(for: resolvedURL)
+        let mime = VaultResourceSchemeHandler.mimeType(for: URL(fileURLWithPath: resolved))
         let wantsBody = upperMethod == "GET"
 
         // Range request: serve only the requested slice via a seek, so scrubbing a
@@ -80,7 +86,7 @@ struct VaultHTTPResponder {
             if wantsBody {
                 // Don't fall back to an empty body while still advertising the range
                 // length — a read failure must surface as 500, not a corrupt 206.
-                guard let partial = Self.readFile(at: resolvedURL, range: range),
+                guard let partial = try? await fileSystem.readRange(at: resolved, range),
                       partial.count == range.count else {
                     return Self.status(500, "Internal Server Error")
                 }
@@ -104,37 +110,28 @@ struct VaultHTTPResponder {
 
         let body: Data
         if wantsBody {
-            guard let full = try? Data(contentsOf: resolvedURL), full.count == size else {
+            guard let full = try? await fileSystem.readData(at: resolved) else {
                 return Self.status(500, "Internal Server Error")
             }
             body = full
         } else {
             body = Data()
         }
+        // Content-Length is the bytes we actually read (`readData` reads to EOF). Some SFTP
+        // servers omit the size attribute (metadata reports 0), so trusting `size` here would
+        // wrongly 500 a perfectly good non-empty file; the read length is authoritative.
+        let contentLength = wantsBody ? body.count : size
         return Response(
             status: 200,
             reason: "OK",
             headers: [
                 .init("Content-Type", mime),
                 .init("Accept-Ranges", "bytes"),
-                .init("Content-Length", String(size)),
+                .init("Content-Length", String(contentLength)),
                 .init("Cache-Control", "no-store"),
             ],
             body: body
         )
-    }
-
-    /// Reads only `range` bytes from a file via a seek, avoiding loading the whole
-    /// file for a partial-content response.
-    private static func readFile(at url: URL, range: Range<Int>) -> Data? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
-        do {
-            try handle.seek(toOffset: UInt64(range.lowerBound))
-            return try handle.read(upToCount: range.count) ?? Data()
-        } catch {
-            return nil
-        }
     }
 
     private static func status(_ status: Int, _ reason: String, extra: [Response.Header] = []) -> Response {
@@ -146,9 +143,10 @@ struct VaultHTTPResponder {
         )
     }
 
-    /// Resolves a request target ("/<token>/notes/x.html?q#frag") to a vault file,
-    /// or nil if the token is wrong or the path escapes the vault.
-    static func fileURL(forTarget target: String, vaultURL: URL, token: String) -> URL? {
+    /// Resolves a request target ("/<token>/notes/x.html?q#frag") to a vault-relative path,
+    /// or nil if the token is wrong or the path escapes the vault (`..`, absolute, NUL). The
+    /// `VaultFileSystem` enforces final containment when it resolves the path.
+    static func relativePath(forTarget target: String, token: String) -> String? {
         var path = target
         if let q = path.firstIndex(of: "?") { path = String(path[..<q]) }
         if let h = path.firstIndex(of: "#") { path = String(path[..<h]) }
@@ -165,10 +163,7 @@ struct VaultHTTPResponder {
         if relative.split(separator: "/", omittingEmptySubsequences: false).contains("..") {
             return nil
         }
-
-        let candidate = vaultURL.appendingPathComponent(relative, isDirectory: false).standardizedFileURL
-        guard containmentPolicy.allows(candidate, vaultRoot: vaultURL) else { return nil }
-        return candidate
+        return relative
     }
 
     /// Parses a single-range `bytes=` header into a half-open byte range, clamped
@@ -220,10 +215,15 @@ final class VaultHTTPServer: @unchecked Sendable {
 
     /// Starts (or restarts) the server for a vault. `completion` is invoked once on an
     /// internal queue with `http://127.0.0.1:<port>/<token>/`, or nil on failure.
-    func start(vaultURL: URL, completion: @escaping @Sendable (URL?) -> Void) {
+    func start(fileSystem: VaultFileSystem, completion: @escaping @Sendable (URL?) -> Void) {
         queue.async { [weak self] in
-            self?.startOnQueue(vaultURL: vaultURL, completion: completion)
+            self?.startOnQueue(fileSystem: fileSystem, completion: completion)
         }
+    }
+
+    /// Convenience: serve a local vault directory.
+    func start(vaultURL: URL, completion: @escaping @Sendable (URL?) -> Void) {
+        start(fileSystem: LocalFileSystem(root: vaultURL), completion: completion)
     }
 
     func stop() {
@@ -236,11 +236,11 @@ final class VaultHTTPServer: @unchecked Sendable {
         listener?.cancel()
     }
 
-    private func startOnQueue(vaultURL: URL, completion: @escaping @Sendable (URL?) -> Void) {
+    private func startOnQueue(fileSystem: VaultFileSystem, completion: @escaping @Sendable (URL?) -> Void) {
         teardown()
 
         let token = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-        responder = VaultHTTPResponder(vaultURL: vaultURL, token: token)
+        responder = VaultHTTPResponder(fileSystem: fileSystem, token: token)
         didComplete = false
 
         let parameters = NWParameters.tcp
@@ -358,7 +358,13 @@ final class VaultHTTPServer: @unchecked Sendable {
             return
         }
 
-        send(responder.respond(method: method, target: target, rangeHeader: rangeHeader), method: method, on: connection)
+        // Generate the response off the serial queue (a remote backend's file read can be
+        // slow) so one request can't block other connections; reply once it's ready.
+        let activeResponder = responder
+        Task {
+            let response = await activeResponder.respond(method: method, target: target, rangeHeader: rangeHeader)
+            self.send(response, method: method, on: connection)
+        }
     }
 
     private func send(_ response: VaultHTTPResponder.Response, method: String, on connection: NWConnection) {

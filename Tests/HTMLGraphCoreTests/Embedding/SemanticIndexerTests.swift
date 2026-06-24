@@ -18,7 +18,7 @@ final class SemanticIndexerTests: XCTestCase {
         SemanticIndexer(
             provider: recorder,
             maxCharsPerChunk: EmbeddingInput.defaultMaxCharsPerChunk,
-            bodyTextLoader: { bodies[$0.id] ?? "" }
+            bodyTextLoader: { node, _ in bodies[node.id] ?? "" }
         )
     }
 
@@ -31,10 +31,10 @@ final class SemanticIndexerTests: XCTestCase {
         ]
         let index = EmbeddingTestFixtures.index(documents: docs)
 
-        _ = try await indexer.refresh(index: index, vaultURL: vaultURL)
+        _ = try await indexer.refresh(index: index, fileSystem: LocalFileSystem(root: vaultURL))
         XCTAssertEqual(recorder.drainEmbeddedTexts().count, 2, "Both docs embedded on first build")
 
-        _ = try await indexer.refresh(index: index, vaultURL: vaultURL)
+        _ = try await indexer.refresh(index: index, fileSystem: LocalFileSystem(root: vaultURL))
         XCTAssertEqual(recorder.drainEmbeddedTexts().count, 0, "Unchanged docs reused from store")
     }
 
@@ -45,14 +45,14 @@ final class SemanticIndexerTests: XCTestCase {
             EmbeddingTestFixtures.document(id: "a", title: "제목A", contentHash: "h1"),
             EmbeddingTestFixtures.document(id: "b", title: "제목B", contentHash: "h2"),
         ])
-        _ = try await indexer.refresh(index: v1, vaultURL: vaultURL)
+        _ = try await indexer.refresh(index: v1, fileSystem: LocalFileSystem(root: vaultURL))
         _ = recorder.drainEmbeddedTexts()
 
         let v2 = EmbeddingTestFixtures.index(documents: [
             EmbeddingTestFixtures.document(id: "a", title: "제목A", contentHash: "h1-CHANGED"),
             EmbeddingTestFixtures.document(id: "b", title: "제목B", contentHash: "h2"),
         ])
-        _ = try await indexer.refresh(index: v2, vaultURL: vaultURL)
+        _ = try await indexer.refresh(index: v2, fileSystem: LocalFileSystem(root: vaultURL))
 
         let embedded = recorder.drainEmbeddedTexts()
         XCTAssertEqual(embedded.count, 1)
@@ -66,18 +66,18 @@ final class SemanticIndexerTests: XCTestCase {
             EmbeddingTestFixtures.document(id: "a", title: "제목A", contentHash: "h1"),
             EmbeddingTestFixtures.document(id: "b", title: "제목B", contentHash: "h2"),
         ])
-        _ = try await indexer.refresh(index: withBoth, vaultURL: vaultURL)
+        _ = try await indexer.refresh(index: withBoth, fileSystem: LocalFileSystem(root: vaultURL))
 
         let withoutB = EmbeddingTestFixtures.index(documents: [
             EmbeddingTestFixtures.document(id: "a", title: "제목A", contentHash: "h1"),
         ])
-        let result = try await indexer.refresh(index: withoutB, vaultURL: vaultURL)
+        let result = try await indexer.refresh(index: withoutB, fileSystem: LocalFileSystem(root: vaultURL))
 
         XCTAssertNotNil(result.entries["a"])
         XCTAssertNil(result.entries["b"], "Ghost doc pruned from in-memory index")
 
-        let persisted = VaultEmbeddingStore().load(
-            providerId: recorder.identifier, dimension: recorder.dimension, vaultURL: vaultURL
+        let persisted = await VaultEmbeddingStore().load(
+            providerId: recorder.identifier, dimension: recorder.dimension, fileSystem: LocalFileSystem(root: vaultURL)
         )
         XCTAssertNil(persisted?["b"], "Ghost doc pruned from the sidecar too")
     }
@@ -92,14 +92,14 @@ final class SemanticIndexerTests: XCTestCase {
         let fullVault = vaultURL.appendingPathComponent("full", isDirectory: true)
         try FileManager.default.createDirectory(at: fullVault, withIntermediateDirectories: true)
         let fullIndexer = makeIndexer(RecordingEmbeddingProvider(), bodies: bodies)
-        let full = try await fullIndexer.refresh(index: finalIndex, vaultURL: fullVault)
+        let full = try await fullIndexer.refresh(index: finalIndex, fileSystem: LocalFileSystem(root: fullVault))
 
         // Path 2: incremental — build with A only, then add B, in another vault.
         let incVault = vaultURL.appendingPathComponent("inc", isDirectory: true)
         try FileManager.default.createDirectory(at: incVault, withIntermediateDirectories: true)
         let incIndexer = makeIndexer(RecordingEmbeddingProvider(), bodies: bodies)
-        _ = try await incIndexer.refresh(index: EmbeddingTestFixtures.index(documents: [docA]), vaultURL: incVault)
-        let incremental = try await incIndexer.refresh(index: finalIndex, vaultURL: incVault)
+        _ = try await incIndexer.refresh(index: EmbeddingTestFixtures.index(documents: [docA]), fileSystem: LocalFileSystem(root: incVault))
+        let incremental = try await incIndexer.refresh(index: finalIndex, fileSystem: LocalFileSystem(root: incVault))
 
         XCTAssertEqual(full.entries, incremental.entries, "Vectors are path-independent for the same final state")
     }
@@ -116,7 +116,7 @@ final class SemanticIndexerTests: XCTestCase {
             title: "제목", contentHash: "h1", lastModified: Date(timeIntervalSince1970: 0)
         )
         let result = try await indexer.refresh(
-            index: EmbeddingTestFixtures.index(documents: [doc]), vaultURL: vaultURL
+            index: EmbeddingTestFixtures.index(documents: [doc]), fileSystem: LocalFileSystem(root: vaultURL)
         )
 
         let vector = try XCTUnwrap(result.entries["note"]?.vector)

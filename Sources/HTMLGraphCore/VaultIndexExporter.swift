@@ -78,33 +78,34 @@ public struct VaultIndexExporter {
     public static let fileName = "graph.json"
     public static let schemaVersion = 1
 
-    private let fileManager: FileManager
+    /// Vault-relative location of the sidecar (`.htmlgraph/graph.json`) — the address passed
+    /// to a `VaultFileSystem`.
+    public static let relativePath = "\(directoryName)/\(fileName)"
 
-    public init(fileManager: FileManager = .default) {
-        self.fileManager = fileManager
-    }
+    public init() {}
 
-    /// The directory the sidecar is written into for a given vault.
+    /// The directory the sidecar is written into for a given local vault.
     public static func sidecarDirectory(forVault vaultURL: URL) -> URL {
         vaultURL.appendingPathComponent(directoryName, isDirectory: true)
     }
 
-    /// The full path of the exported graph file for a given vault.
+    /// The full path of the exported graph file for a given local vault.
     public static func graphFileURL(forVault vaultURL: URL) -> URL {
         sidecarDirectory(forVault: vaultURL).appendingPathComponent(fileName)
     }
 
-    /// Writes `<vault>/.htmlgraph/graph.json` atomically. Returns the file URL.
-    @discardableResult
-    public func export(_ index: VaultIndex, vaultURL: URL) throws -> URL {
-        let directory = Self.sidecarDirectory(forVault: vaultURL)
-        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-
-        let fileURL = directory.appendingPathComponent(Self.fileName)
+    /// Writes `.htmlgraph/graph.json` atomically over `fileSystem`.
+    public func export(_ index: VaultIndex, fileSystem: VaultFileSystem) async throws {
         let payload = ExportedGraph(schemaVersion: Self.schemaVersion, index: index)
         let data = try VaultIndexJSON.interoperableEncoder.encode(payload)
-        try data.write(to: fileURL, options: [.atomic])
+        try await fileSystem.createDirectory(at: Self.directoryName)
+        try await fileSystem.writeData(data, to: Self.relativePath, options: [.atomic])
+    }
 
-        return fileURL
+    /// Convenience: export to a local vault directory, returning the written file URL.
+    @discardableResult
+    public func export(_ index: VaultIndex, vaultURL: URL) async throws -> URL {
+        try await export(index, fileSystem: LocalFileSystem(root: vaultURL))
+        return Self.graphFileURL(forVault: vaultURL)
     }
 }

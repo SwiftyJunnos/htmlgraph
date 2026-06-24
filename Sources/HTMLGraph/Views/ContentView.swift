@@ -38,8 +38,12 @@ struct ContentView: View {
         }
         .navigationTitle(appState.vaultDisplayName ?? "HTMLGraph")
         .navigationSubtitle(appState.vaultStatusText)
+        .sheet(isPresented: $appState.isShowingRemoteConnect) {
+            RemoteConnectView()
+                .environmentObject(appState)
+        }
         .toolbar {
-            if appState.vaultURL != nil {
+            if appState.hasOpenVault {
                 ToolbarItem(placement: .automatic) {
                     Button {
                         showsSecurityPopover = true
@@ -155,31 +159,38 @@ struct ContentView: View {
     }
 
     private func chooseVault() {
-        guard EditorGuard.confirmLeavingEditor(appState) else { return }
-        appState.chooseAndOpenVault()
+        Task {
+            guard await EditorGuard.confirmLeavingEditor(appState) else { return }
+            appState.chooseAndOpenVault()
+        }
     }
 
     private func exportWebSite() {
-        guard EditorGuard.confirmLeavingEditor(appState),
-              let destinationURL = VaultFolderPicker.chooseStaticSiteExportFolder() else {
-            return
+        Task {
+            // `confirmLeavingEditor` is async (it may save over the network), so confirm first,
+            // then run the local export-folder picker and kick off the export.
+            guard await EditorGuard.confirmLeavingEditor(appState),
+                  let destinationURL = VaultFolderPicker.chooseStaticSiteExportFolder() else {
+                return
+            }
+            appState.exportStaticSite(to: destinationURL)
         }
-        appState.exportStaticSite(to: destinationURL)
     }
 
     private func acceptInboxItem(_ item: InboxItem) {
-        // Accepting reopens the vault (a full reindex that clears the editor buffer), so
-        // confirm any unsaved edits before the destination picker takes over.
-        guard EditorGuard.confirmLeavingEditor(appState) else { return }
-        guard let vaultURL = appState.vaultURL,
-              let destinationURL = InboxDestinationPicker.chooseDestination(for: item, vaultURL: vaultURL) else {
-            return
-        }
-
-        do {
-            try appState.acceptInboxItem(item, to: destinationURL)
-        } catch {
-            appState.errorMessage = error.localizedDescription
+        Task {
+            // Accepting reopens the vault (a full reindex that clears the editor buffer), so
+            // confirm any unsaved edits before the destination picker takes over.
+            guard await EditorGuard.confirmLeavingEditor(appState) else { return }
+            guard let vaultURL = appState.vaultURL,
+                  let destinationURL = InboxDestinationPicker.chooseDestination(for: item, vaultURL: vaultURL) else {
+                return
+            }
+            do {
+                try await appState.acceptInboxItem(item, to: destinationURL)
+            } catch {
+                appState.errorMessage = error.localizedDescription
+            }
         }
     }
 }
