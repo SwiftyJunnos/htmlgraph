@@ -238,11 +238,36 @@ Operations the protocol must cover, by call site:
     `testSyntheticRootClassifiesRemoteInternalDocument` (nav policy). Verified: 218 tests (135 core +
     83 app) + xcodebuild green. **Remote vaults are now fully usable: connect → browse → search →
     preview (read + visual) → edit → save → file-ops.**
-  - **M10 (NEXT) — hardening + polish.** Remote display name/title (currently `vaultDisplayName` is
-    nil for remote so the window title falls back to "HTMLGraph"; derive from `vaultIdentity`).
-    Keychain for the password + remote recents (generalize `RecentVault`); host-key TOFU (replace
-    `acceptAnything()`); key-based auth; `posix-rename@openssh.com` atomic writes; connection
-    lifecycle (close SSH on vault switch/quit); cache relocation.
+  - ✅ **M10a — remote display name + connection lifecycle (DONE 2026-06-24).** `VaultFileSystem`
+    gained `displayName` + `displaySubtitle` (defaulted to `vaultIdentity`/nil). Local = folder name +
+    full path; SFTP = remote folder name (host when root is "/") + `user@host:path` (default port
+    omitted). AppState's `vaultDisplayName`/`vaultDisplayPath`/`openVaultButtonTitle` read from the
+    session FS, so remote shows a real title/subtitle (local unchanged). `beginSession` calls
+    `SFTPFileSystem.disconnect()` on a previous remote when switching vaults (reindex reuses the live
+    connection). Verified: 223 tests + xcodebuild green.
+  - ✅ **M10c — Keychain credentials + remote recents (DONE 2026-06-24).** `RecentVault` made remote-
+    aware: `bookmarkData` is now optional and a `remote: RemoteConnection?` (host/port/user/path)
+    carries reconnect details; legacy local-only records decode with `remote == nil`. A `CredentialStore`
+    protocol (injectable; `KeychainCredentialStore` default, in-memory in tests) stores the password in
+    the macOS Keychain keyed by vault identity. `openRemoteVault` records a remote recent + saves the
+    password; `openRecent` reconnects a remote recent using the stored password (falls back to the
+    connect sheet if it's gone, silent on automatic launch reopen); `removeRecent`/`dropRecent` delete
+    the Keychain item. The connect sheet text + recents-list icon (network vs folder) updated. Verified:
+    229 tests (139 core + 90 app) + xcodebuild green.
+  - **M10b / remaining hardening (DEFERRED — needs a live SSH server to verify):**
+    - **Key-based auth** — Citadel supports `.ed25519`/`.rsa`/`.p256/384/521` + OpenSSH PEM parsing
+      (`Curve25519.Signing.PrivateKey(sshEd25519:)`, `Insecure.RSA.PrivateKey(sshRsa:)`). Needs
+      `import Crypto` → add swift-crypto as an explicit product dep of HTMLGraphCore (Package.swift +
+      the pbxproj 6-entry pattern). Add `SFTPCredential.privateKey(pem:passphrase:)` (auto-detect type
+      by trying each parser) + a key-file field in the connect sheet. Auth itself is only verifiable
+      against a real server.
+    - **Host-key TOFU** — `SSHHostKeyValidator.custom(_:)`/`.trustedKeys(Set<NIOSSHPublicKey>)` exist,
+      but `NIOSSHPublicKey` has no built-in fingerprint/serialization, so persisting a trusted key
+      across launches needs care + live verification. Replaces `acceptAnything()` (current MITM gap).
+    - **posix-rename atomic** — Citadel's `rename(at:to:flags:)` exposes raw flags but no
+      `posix-rename@openssh.com` extension; SFTP v3 servers ignore rename flags, so the current
+      temp+remove+rename window stays. Revisit if Citadel adds the extension.
+    - Connection close on app quit (process exit already tears down sockets); cache relocation.
 
 - **M9 — `SFTPFileSystem` implementation. IN PROGRESS.**
   - ✅ **Citadel added** (`Package.swift` → `orlandos-nl/Citadel` from 0.7.0; resolved to

@@ -558,7 +558,7 @@ struct ReaderPane: View {
                     appState.openRecent(recent)
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "folder")
+                        Image(systemName: recent.isRemote ? "network" : "folder")
                             .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(recent.displayName)

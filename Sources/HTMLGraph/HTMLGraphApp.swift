@@ -18,7 +18,7 @@ struct HTMLGraphApp: App {
                     // unsaved editor edits before the process terminates.
                     appDelegate.appState = appState
                     if autoReopenLastVault,
-                       appState.vaultURL == nil,
+                       !appState.hasOpenVault,
                        let mostRecent = appState.recentVaults.first {
                         appState.openRecent(mostRecent, isAutomatic: true)
                     }

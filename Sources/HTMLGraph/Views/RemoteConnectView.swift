@@ -38,7 +38,7 @@ struct RemoteConnectView: View {
             }
             .textFieldStyle(.roundedBorder)
 
-            Text("The password is used only for this session and isn’t saved yet.")
+            Text("The password is saved to your Keychain so you can reopen this vault from Recent.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

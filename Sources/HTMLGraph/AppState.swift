@@ -1,6 +1,7 @@
 import Foundation
 import HTMLGraphCore
 import OSLog
+import Security
 import SwiftUI
 
 /// A single selection across the sidebar so Inbox and Documents share one
@@ -90,16 +91,29 @@ enum DocumentTreeBuilder {
     }
 }
 
-/// A vault the user has opened before. Stores a security-scoped bookmark (required
-/// to re-open a sandboxed user-selected folder across launches) plus a stable path
-/// used as identity, de-dup key, and the UI subtitle.
+/// Connection details for a remote (SFTP) vault — everything needed to reconnect EXCEPT the
+/// password, which lives in the Keychain keyed by the vault's `path` identity.
+struct RemoteConnection: Codable, Hashable {
+    let host: String
+    let port: Int
+    let username: String
+    let remotePath: String
+}
+
+/// A vault the user has opened before. For a LOCAL vault it stores a security-scoped bookmark
+/// (required to re-open a sandboxed user-selected folder across launches); for a REMOTE vault
+/// it stores the SFTP connection details (`remote`) and the password is kept in the Keychain.
+/// `path` is the stable identity, de-dup key, and UI subtitle (local path or sftp:// identity).
 struct RecentVault: Codable, Identifiable, Hashable {
-    let bookmarkData: Data
+    let bookmarkData: Data?
     let displayName: String
     let path: String
     let lastOpened: Date
+    /// Present iff this is a remote vault. Decodes to nil for older (local-only) records.
+    var remote: RemoteConnection? = nil
 
     var id: String { path }
+    var isRemote: Bool { remote != nil }
 }
 
 /// UserDefaults-backed persistence for the recent vaults list. Pure storage — the
@@ -124,6 +138,56 @@ struct RecentVaultsStore {
         if let data = try? JSONEncoder().encode(capped) {
             defaults.set(data, forKey: key)
         }
+    }
+}
+
+/// Secure storage for remote-vault passwords, keyed by the vault's identity. The default
+/// backing is the macOS Keychain; tests inject an in-memory implementation.
+protocol CredentialStore: AnyObject {
+    func password(forIdentity identity: String) -> String?
+    func setPassword(_ password: String, forIdentity identity: String)
+    func removePassword(forIdentity identity: String)
+}
+
+/// Keychain-backed `CredentialStore`: one generic-password item per vault identity. Keychain
+/// errors are swallowed (a failed save just means the user re-enters the password next time) —
+/// a remote vault must never become un-openable because the Keychain was unavailable.
+final class KeychainCredentialStore: CredentialStore {
+    private let service = "com.junnos.htmlgraph.remote-vault"
+
+    private func baseQuery(_ identity: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: identity,
+        ]
+    }
+
+    func password(forIdentity identity: String) -> String? {
+        var query = baseQuery(identity)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    func setPassword(_ password: String, forIdentity identity: String) {
+        let data = Data(password.utf8)
+        let status = SecItemUpdate(
+            baseQuery(identity) as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary
+        )
+        if status == errSecItemNotFound {
+            var add = baseQuery(identity)
+            add[kSecValueData as String] = data
+            SecItemAdd(add as CFDictionary, nil)
+        }
+    }
+
+    func removePassword(forIdentity identity: String) {
+        SecItemDelete(baseQuery(identity) as CFDictionary)
     }
 }
 
@@ -262,6 +326,7 @@ final class AppState: ObservableObject {
     var vaultFileSystem: (any VaultFileSystem)?
     private let recentsStore: RecentVaultsStore
     private let securityStore: VaultSecurityStore
+    private let credentialStore: any CredentialStore
     /// True while restoring a vault's saved security posture, so the property
     /// `didSet`s don't immediately persist the value we just loaded back.
     private var isApplyingVaultSecurity = false
@@ -299,10 +364,12 @@ final class AppState: ObservableObject {
 
     init(
         recentsStore: RecentVaultsStore = RecentVaultsStore(),
-        securityStore: VaultSecurityStore = VaultSecurityStore()
+        securityStore: VaultSecurityStore = VaultSecurityStore(),
+        credentialStore: any CredentialStore = KeychainCredentialStore()
     ) {
         self.recentsStore = recentsStore
         self.securityStore = securityStore
+        self.credentialStore = credentialStore
         self.recentVaults = recentsStore.load()
     }
 
@@ -450,13 +517,19 @@ final class AppState: ObservableObject {
     /// Re-opens a previously recorded vault by resolving its security-scoped bookmark.
     /// Drops the entry (and, unless automatic, surfaces an error) if it can't be opened.
     func openRecent(_ recent: RecentVault, isAutomatic: Bool = false) {
+        if let remote = recent.remote {
+            openRemoteRecent(recent, remote: remote, isAutomatic: isAutomatic)
+            return
+        }
+
         var isStale = false
-        guard let resolved = try? URL(
-            resolvingBookmarkData: recent.bookmarkData,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else {
+        guard let bookmarkData = recent.bookmarkData,
+              let resolved = try? URL(
+                  resolvingBookmarkData: bookmarkData,
+                  options: .withSecurityScope,
+                  relativeTo: nil,
+                  bookmarkDataIsStale: &isStale
+              ) else {
             dropRecent(recent, automatic: isAutomatic)
             return
         }
@@ -476,14 +549,27 @@ final class AppState: ObservableObject {
             return
         }
 
-        var bookmarkData = recent.bookmarkData
+        var refreshedBookmark = bookmarkData
         if isStale,
            let refreshed = try? resolved.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
-            bookmarkData = refreshed
+            refreshedBookmark = refreshed
         }
 
-        recordRecent(url: resolved, bookmarkData: bookmarkData)
+        recordRecent(url: resolved, bookmarkData: refreshedBookmark)
         beginSession(at: resolved)
+    }
+
+    /// Reopens a remote vault from Recent: pull the saved password from the Keychain and
+    /// reconnect. If the password is gone (e.g. the Keychain item was removed), fall back to
+    /// the connect sheet for a manual re-entry — but stay silent on automatic launch reopen.
+    private func openRemoteRecent(_ recent: RecentVault, remote: RemoteConnection, isAutomatic: Bool) {
+        guard let password = credentialStore.password(forIdentity: recent.path) else {
+            if !isAutomatic { isShowingRemoteConnect = true }
+            return
+        }
+        openRemoteVault(
+            host: remote.host, port: remote.port, username: remote.username,
+            password: password, remotePath: remote.remotePath)
     }
 
     /// Shows the folder picker and opens the chosen vault. Single entry point so the
@@ -503,6 +589,17 @@ final class AppState: ObservableObject {
         let fileSystem = SFTPFileSystem(
             host: host, port: port, username: username,
             credential: .password(password), remotePath: remotePath)
+        let identity = fileSystem.vaultIdentity
+        // Persist the password (Keychain) + connection details (recents) so the vault can be
+        // reopened from Recent without re-entering everything.
+        credentialStore.setPassword(password, forIdentity: identity)
+        insertRecent(RecentVault(
+            bookmarkData: nil,
+            displayName: fileSystem.displayName,
+            path: identity,
+            lastOpened: Date(),
+            remote: RemoteConnection(host: host, port: port, username: username, remotePath: remotePath)
+        ))
         beginSession(fileSystem: fileSystem, displayURL: nil)
     }
 
@@ -515,6 +612,7 @@ final class AppState: ObservableObject {
     var hasOpenVault: Bool { vaultFileSystem != nil }
 
     func removeRecent(_ recent: RecentVault) {
+        if recent.isRemote { credentialStore.removePassword(forIdentity: recent.path) }
         recentVaults.removeAll { $0.path == recent.path }
         recentsStore.save(recentVaults)
     }
@@ -639,8 +737,14 @@ final class AppState: ObservableObject {
     private func recordRecent(url: URL, bookmarkData: Data) {
         let standardizedPath = url.standardizedFileURL.path
         let name = url.lastPathComponent.isEmpty ? standardizedPath : url.lastPathComponent
-        let entry = RecentVault(bookmarkData: bookmarkData, displayName: name, path: standardizedPath, lastOpened: Date())
-        recentVaults.removeAll { $0.path.caseInsensitiveCompare(standardizedPath) == .orderedSame }
+        insertRecent(RecentVault(
+            bookmarkData: bookmarkData, displayName: name, path: standardizedPath, lastOpened: Date()))
+    }
+
+    /// Inserts a recent at the front, de-duped by `path` (case-insensitive) and capped to the
+    /// max count, then persists. Shared by local and remote opens.
+    private func insertRecent(_ entry: RecentVault) {
+        recentVaults.removeAll { $0.path.caseInsensitiveCompare(entry.path) == .orderedSame }
         recentVaults.insert(entry, at: 0)
         if recentVaults.count > RecentVaultsStore.maxCount {
             recentVaults = Array(recentVaults.prefix(RecentVaultsStore.maxCount))
@@ -649,6 +753,7 @@ final class AppState: ObservableObject {
     }
 
     private func dropRecent(_ recent: RecentVault, automatic: Bool) {
+        if recent.isRemote { credentialStore.removePassword(forIdentity: recent.path) }
         recentVaults.removeAll { $0.path == recent.path }
         recentsStore.save(recentVaults)
         if !automatic {
