@@ -1,7 +1,7 @@
 # Remote Vault over SSH — In-app SFTP filesystem layer
 
-Status: M1–M7 done (full local abstraction). M9 started: Citadel dependency integrated & verified.
-Next: implement SFTPFileSystem. Started: 2026-06-24. Owner: Junnos
+Status: M1–M7 + M9 SFTPFileSystem done (compiles vs Citadel, both build systems green).
+Next: M8 (wire remote vaults into AppState — connect UI / identity / Keychain). Owner: Junnos
 
 ## Goal
 
@@ -210,19 +210,23 @@ Operations the protocol must cover, by call site:
       `SFTPFileAttributes` (size, mtime, isDirectory via permissions/type), `SFTPOpenFileFlags`
       cases, `SSHAuthenticationMethod` (.passwordBased / .rsa/ed25519 publicKey),
       `SSHHostKeyValidator` (`.acceptAnything()` for TOFU first pass).
-  - **TODO**: implement `SFTPFileSystem` (in HTMLGraphCore) conforming to `VaultFileSystem` —
-    a connection actor holding the `SFTPClient`; map each method (recursive `enumerateFiles`
-    via `listDirectory`; `readData`=`openFile(.read)+readAll`; `readRange`=`read(from:length:)`;
-    `metadata`/`exists`=`getAttributes`; `writeData` atomic = write temp + `rename`; `move`/`copy`
-    (copy = read+write, no SFTP copy); `trash` = move into `.htmlgraph/.trash/`; `remove`/`rmdir`;
-    `vaultIdentity` = `sftp://user@host:port/path`; `absolutePath` = nil). Root path prefixing
-    (all relative paths joined under the remote vault root).
-  - **TODO (pbxproj)**: wire Citadel into the Xcode project (replicate SwiftSoup's 6 entries:
-    PBXBuildFile, Frameworks phase, target packageProductDependencies, project packageReferences,
-    XCRemoteSwiftPackageReference, XCSwiftPackageProductDependency) so `xcodebuild` links it once
-    `SFTPFileSystem` does `import Citadel`. Plus register `SFTPFileSystem.swift` (classic pbxproj).
-  - **TODO (testing)**: no SSH server in CI → unit-test path/identity/error logic; integration
-    test against a local `sshd` is manual/optional.
+  - ✅ **`SFTPFileSystem` implemented** (`Sources/HTMLGraphCore/SFTPFileSystem.swift`): a
+    `Sendable` struct over an `SFTPConnection` actor (lazily connects via `SSHClient.connect`
+    + `openSFTP()`, reuses the live `SFTPClient`). Maps every `VaultFileSystem` method —
+    recursive `enumerateFiles` (stack over `listDirectory`, skip `.`/`..`/hidden), `readData`=
+    `openFile(.read)+readAll`, `readRange`=`read(from:length:)`, `metadata`/`exists`=
+    `getAttributes` (isDir/isRegular via POSIX mode bits), `writeData` atomic = temp write +
+    remove + `rename` (non-atomic window — hardening TODO), `move`=`rename`, `copy`=read+write,
+    `trash`=move into `.htmlgraph/.trash/` (unique-suffixed), `remove`/`rmdir`, `createDirectory`
+    = mkdir-p, `vaultIdentity`=`sftp://user@host:port/root`, `absolutePath`=nil. Auth: **password
+    only** for now (`SFTPCredential.password`; key auth is a hardening TODO — the OpenSSH
+    key-parsing API needs pinning). `SSHHostKeyValidator.acceptAnything()` (TOFU is a TODO).
+  - ✅ **Citadel wired into `project.pbxproj`** (SwiftSoup's 6-entry pattern on HTMLGraphCore)
+    + `SFTPFileSystem.swift` registered. Both `swift test` (135, +3 SFTP construction tests) and
+    `xcodebuild` (resolves Citadel 0.12.1, compiles + links) green.
+  - **Known limits (→ M10)**: no integration test (needs a live `sshd`; pure logic unit-tested);
+    `disconnect()` only closes the SFTP client (SSHClient is non-Sendable, released not closed);
+    concurrent first-use can open two connections; atomic-write window; password-only auth.
 
 - **M10 — Hardening + cache relocation.**
   Sidecars/index cache to `~/Library/Caches` for remote; surface connection-loss instead of
