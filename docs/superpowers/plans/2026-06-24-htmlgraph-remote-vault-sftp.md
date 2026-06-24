@@ -1,7 +1,7 @@
 # Remote Vault over SSH — In-app SFTP filesystem layer
 
-Status: M1–M7 + M9 SFTPFileSystem done (compiles vs Citadel, both build systems green).
-Next: M8 (wire remote vaults into AppState — connect UI / identity / Keychain). Owner: Junnos
+Status: M1–M7 + M9 SFTPFileSystem + M8a (session-FS centralization) done. Next: M8b (remote
+open path + connect UI + Keychain + file-op guards). Owner: Junnos
 
 ## Goal
 
@@ -190,8 +190,20 @@ Operations the protocol must cover, by call site:
   M8/M10. Verified: `swift test` (132) + `xcodebuild`.
 
 - **M8 — Vault identity + selection model.**
-  Generalize `RecentVault` / `VaultIndex.vaultId` to a `VaultRef` (local URL **or**
-  remote host+path). A "Connect to Remote…" dialog; credentials in Keychain; host-key TOFU.
+  - ✅ **M8a — session-FS centralization (DONE 2026-06-24).** `AppState` holds
+    `private var vaultFileSystem: (any VaultFileSystem)?`; `beginSession(fileSystem:displayURL:)`
+    is the core (`beginSession(at:)` is the local wrapper). `finishIndexing`, the embedding
+    helpers (`rebuildEmbeddingIndex`/`refreshEmbedding`/`persistEmbeddingIndex`), inbox refresh,
+    sidecar export, and all file-op/editor FS construction now go through `vaultFileSystem`
+    (local fallback `?? LocalFileSystem(root: vaultURL)` never triggers locally). Security
+    settings keyed by `vaultIdentity` (== local path, so behavior-preserving). `vaultURL` kept
+    for local display/recents only. Behavior-preserving — 135 tests + xcodebuild green.
+  - **M8b — remote open + UI (NEXT).** `openRemoteVault(...)` building an `SFTPFileSystem` →
+    `beginSession(fileSystem:displayURL: nil)`; change file-op/editor guards from `vaultURL` to
+    `vaultFileSystem` so writes work on remote; a "Connect to Remote…" dialog (host/user/pw/path);
+    password in Keychain; persist remote vaults in recents (generalize `RecentVault`); host-key
+    TOFU (replace `acceptAnything()`); hide local-only UI (Reveal in Finder / external editor)
+    for remote vaults.
 
 - **M9 — `SFTPFileSystem` implementation. IN PROGRESS.**
   - ✅ **Citadel added** (`Package.swift` → `orlandos-nl/Citadel` from 0.7.0; resolved to

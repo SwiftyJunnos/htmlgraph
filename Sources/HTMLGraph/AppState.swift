@@ -253,6 +253,10 @@ final class AppState: ObservableObject {
 
     /// The single folder we currently hold a security-scoped access claim on.
     private var accessedVaultURL: URL?
+    /// The current vault's file system (local or remote SFTP) — the single source of truth for
+    /// every read/write this session. `vaultURL` is kept only for local display / recents /
+    /// Reveal-in-Finder and is nil for a remote vault.
+    private var vaultFileSystem: (any VaultFileSystem)?
     private let recentsStore: RecentVaultsStore
     private let securityStore: VaultSecurityStore
     /// True while restoring a vault's saved security posture, so the property
@@ -334,8 +338,8 @@ final class AppState: ObservableObject {
 
     /// Restores the security posture remembered for `url`, defaulting to Safe for a
     /// vault we've never seen. Suppresses persistence so loading doesn't re-save.
-    private func applyStoredSecuritySettings(for url: URL) {
-        let stored = securityStore.settings(forPath: url.standardizedFileURL.path)
+    private func applyStoredSecuritySettings(forIdentity identity: String) {
+        let stored = securityStore.settings(forPath: identity)
             ?? VaultSecuritySettings(trustMode: .safe, allowsNetworkAccess: false)
         isApplyingVaultSecurity = true
         trustMode = stored.trustMode
@@ -344,13 +348,14 @@ final class AppState: ObservableObject {
         isApplyingVaultSecurity = false
     }
 
-    /// Persists the live trust/network posture for the open vault. No-op while a
-    /// restore is in flight or when no vault is open (e.g. app-launch defaults).
+    /// Persists the live trust/network posture for the open vault, keyed by the vault's
+    /// identity (local path or remote URL). No-op while a restore is in flight or no vault
+    /// is open.
     private func persistSecuritySettingsIfNeeded() {
-        guard !isApplyingVaultSecurity, let url = vaultURL else { return }
+        guard !isApplyingVaultSecurity, let identity = vaultFileSystem?.vaultIdentity else { return }
         securityStore.save(
             VaultSecuritySettings(trustMode: trustMode, allowsNetworkAccess: allowsNetworkAccess),
-            forPath: url.standardizedFileURL.path
+            forPath: identity
         )
     }
 
@@ -499,22 +504,24 @@ final class AppState: ObservableObject {
 
     /// Shared work of opening a vault: cancel prior tasks, reset state, kick off
     /// indexing + inbox polling. Access/bookmark handling happens in the callers.
-    private func beginSession(at url: URL) {
+    private func beginSession(fileSystem: any VaultFileSystem, displayURL: URL?) {
+        let identity = fileSystem.vaultIdentity
         // Trust and network access are per-vault and remembered across launches. On an
         // actual vault change, restore the posture the user last chose for this vault
         // (Safe by default). Same-vault reindexes (creating a doc, accepting an inbox
         // item) keep the live settings so an enabled session isn't silently revoked.
-        let isDifferentVault = vaultURL?.standardizedFileURL.path
-            .caseInsensitiveCompare(url.standardizedFileURL.path) != .orderedSame
+        let isDifferentVault = (vaultFileSystem?.vaultIdentity)?
+            .caseInsensitiveCompare(identity) != .orderedSame
 
         indexingTask?.cancel()
         inboxPollingTask?.cancel()
 
         let generation = UUID()
         indexingGeneration = generation
-        vaultURL = url
+        vaultFileSystem = fileSystem
+        vaultURL = displayURL
         if isDifferentVault {
-            applyStoredSecuritySettings(for: url)
+            applyStoredSecuritySettings(forIdentity: identity)
             pendingEmptyFolders = []
         }
         index = nil
@@ -537,9 +544,9 @@ final class AppState: ObservableObject {
 
         vaultBaseURL = nil
         previewServerFailed = false
-        httpServer.start(vaultURL: url) { [weak self] base in
+        httpServer.start(fileSystem: fileSystem) { [weak self] base in
             Task { @MainActor in
-                guard let self, self.vaultURL == url else { return }
+                guard let self, self.vaultFileSystem?.vaultIdentity == identity else { return }
                 self.vaultBaseURL = base
                 // Tracked separately from errorMessage so a successful index doesn't
                 // erase it (finishIndexing clears errorMessage unconditionally).
@@ -559,7 +566,7 @@ final class AppState: ObservableObject {
             do {
                 let builtIndex = try await Task.detached(priority: .userInitiated) {
                     try Task.checkCancellation()
-                    let index = try await VaultIndexer().indexVault(fileSystem: LocalFileSystem(root: url))
+                    let index = try await VaultIndexer().indexVault(fileSystem: fileSystem)
                     try Task.checkCancellation()
                     return index
                 }.value
@@ -574,6 +581,11 @@ final class AppState: ObservableObject {
         }
 
         startInboxPolling()
+    }
+
+    /// Convenience: open a local vault directory.
+    private func beginSession(at url: URL) {
+        beginSession(fileSystem: LocalFileSystem(root: url), displayURL: url)
     }
 
     private func beginAccess(_ url: URL) {
@@ -622,42 +634,35 @@ final class AppState: ObservableObject {
         switch result {
         case .success(let builtIndex):
             index = builtIndex
-            if let vaultURL {
-                // Drop in-session empty folders that have since gained a document (now
-                // shown via the index) or vanished from disk (deleted out-of-band), so
-                // the overlay can't resurrect or ghost a folder.
-                pendingEmptyFolders = pendingEmptyFolders.filter { folder in
-                    let directory = vaultURL.appendingPathComponent(folder, isDirectory: true)
-                    var isDirectory: ObjCBool = false
-                    let exists = FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory) && isDirectory.boolValue
-                    let hasDocument = builtIndex.documents.contains { $0.path == folder || $0.path.hasPrefix(folder + "/") }
-                    return exists && !hasDocument
-                }
-                // Best-effort: emit the machine-readable graph sidecar for AI tools.
-                // A write failure must never break indexing and must not touch
-                // errorMessage (cleared on success below) — just log it so a missing
-                // sidecar is diagnosable.
+            // Drop in-session empty folders that have since gained a document (now shown via
+            // the index) or vanished from disk. The disk-existence check is local-only
+            // (FileManager); for a remote vault we drop only folders that now hold a document.
+            pendingEmptyFolders = pendingEmptyFolders.filter { folder in
+                let hasDocument = builtIndex.documents.contains { $0.path == folder || $0.path.hasPrefix(folder + "/") }
+                if hasDocument { return false }
+                guard let vaultURL else { return true }
+                let directory = vaultURL.appendingPathComponent(folder, isDirectory: true)
+                var isDirectory: ObjCBool = false
+                return FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory) && isDirectory.boolValue
+            }
+            if let fileSystem = vaultFileSystem {
+                // Best-effort sidecars + semantic index over the vault's file system; a failure
+                // must never break indexing or touch errorMessage (cleared on success below).
                 Task {
                     do {
-                        try await VaultIndexExporter().export(builtIndex, vaultURL: vaultURL)
+                        try await VaultIndexExporter().export(builtIndex, fileSystem: fileSystem)
                     } catch {
                         Self.exportLogger.error("graph.json export failed: \(error.localizedDescription, privacy: .public)")
                     }
                 }
-                // Best-effort, create-only: drop AGENTS.md / CLAUDE.md at the vault root so
-                // AI coding agents that open this folder know it's an HTMLGraph vault and how
-                // to work in it. Never overwrites existing files (preserving user edits) and,
-                // like the graph export, never breaks indexing or touches errorMessage.
                 Task {
                     do {
-                        try await VaultAgentGuideWriter().writeIfMissing(vaultURL: vaultURL)
+                        try await VaultAgentGuideWriter().writeIfMissing(fileSystem: fileSystem)
                     } catch {
                         Self.agentGuideLogger.error("agent guide write failed: \(error.localizedDescription, privacy: .public)")
                     }
                 }
-                // Best-effort, off-main: refresh the on-device semantic index. Never
-                // blocks indexing (exactly like the graph.json export above).
-                rebuildEmbeddingIndex(for: builtIndex, vaultURL: vaultURL)
+                rebuildEmbeddingIndex(for: builtIndex, fileSystem: fileSystem)
             }
             if let pendingSelectionId, builtIndex.document(id: pendingSelectionId) != nil {
                 sidebarSelection = .document(pendingSelectionId)
@@ -665,9 +670,9 @@ final class AppState: ObservableObject {
                 sidebarSelection = builtIndex.documents.first.map { .document($0.id) }
             }
             pendingSelectionId = nil
-            if let vaultURL {
+            if let fileSystem = vaultFileSystem {
                 Task {
-                    if let scanned = try? await InboxScanner().scanInbox(at: vaultURL) {
+                    if let scanned = try? await InboxScanner().scanInbox(fileSystem: fileSystem) {
                         inboxItems = scanned
                     }
                 }
@@ -780,7 +785,7 @@ final class AppState: ObservableObject {
     /// Rebuilds the whole semantic index off-main after a full reindex. Re-embeds only
     /// documents whose content changed (cache hit otherwise) and prunes ghosts.
     /// Generation-guarded so a superseded vault-open drops its result.
-    private func rebuildEmbeddingIndex(for index: VaultIndex, vaultURL: URL) {
+    private func rebuildEmbeddingIndex(for index: VaultIndex, fileSystem: any VaultFileSystem) {
         guard let indexer = makeSemanticIndexer() else {
             semanticIndexState = .unavailable
             return
@@ -789,9 +794,9 @@ final class AppState: ObservableObject {
         embeddingGeneration = generation
         semanticIndexState = .building(progress: 0)
 
-        Task(priority: .utility) { [weak self, indexer, index, vaultURL, generation] in
+        Task(priority: .utility) { [weak self, indexer, index, fileSystem, generation] in
             do {
-                let result = try await indexer.refresh(index: index, fileSystem: LocalFileSystem(root: vaultURL))
+                let result = try await indexer.refresh(index: index, fileSystem: fileSystem)
                 guard let self, self.embeddingGeneration == generation else { return }
                 self.embeddingIndex = result
                 self.semanticIndexState = .ready
@@ -807,21 +812,21 @@ final class AppState: ObservableObject {
     /// Re-embeds exactly one document after an in-app save, off-main, and patches the
     /// in-memory index + sidecar. Bumps the generation so any in-flight full rebuild is
     /// invalidated (the just-saved vector must win). No-op until a full index exists.
-    private func refreshEmbedding(forDocumentId documentId: String, in index: VaultIndex, vaultURL: URL) {
+    private func refreshEmbedding(forDocumentId documentId: String, in index: VaultIndex, fileSystem: any VaultFileSystem) {
         guard let indexer = makeSemanticIndexer(),
               embeddingIndex != nil,
               let document = index.document(id: documentId) else { return }
         let generation = UUID()
         embeddingGeneration = generation
 
-        Task(priority: .utility) { [weak self, indexer, document, documentId, vaultURL, generation] in
+        Task(priority: .utility) { [weak self, indexer, document, documentId, fileSystem, generation] in
             do {
-                let record = try await indexer.embedRecord(for: document, fileSystem: LocalFileSystem(root: vaultURL))
+                let record = try await indexer.embedRecord(for: document, fileSystem: fileSystem)
                 guard let self, self.embeddingGeneration == generation,
                       var current = self.embeddingIndex else { return }
                 current.entries[documentId] = record
                 self.embeddingIndex = current
-                self.persistEmbeddingIndex(to: vaultURL)
+                self.persistEmbeddingIndex(fileSystem: fileSystem)
             } catch {
                 Self.embeddingLogger.error("incremental embedding failed: \(error.localizedDescription, privacy: .public)")
             }
@@ -829,7 +834,7 @@ final class AppState: ObservableObject {
     }
 
     /// Persists the current in-memory embedding index to its sidecar, off-main.
-    private func persistEmbeddingIndex(to vaultURL: URL) {
+    private func persistEmbeddingIndex(fileSystem: any VaultFileSystem) {
         guard let snapshot = embeddingIndex else { return }
         let store = embeddingStore
         Task.detached(priority: .utility) {
@@ -838,7 +843,7 @@ final class AppState: ObservableObject {
                     snapshot.entries,
                     providerId: snapshot.providerId,
                     dimension: snapshot.dimension,
-                    fileSystem: LocalFileSystem(root: vaultURL)
+                    fileSystem: fileSystem
                 )
             } catch {
                 Self.embeddingLogger.error("embedding persist failed: \(error.localizedDescription, privacy: .public)")
@@ -863,13 +868,13 @@ final class AppState: ObservableObject {
     }
 
     func refreshInbox() async throws {
-        guard let vaultURL else {
+        guard let vaultFileSystem else {
             inboxItems = []
             if case .inbox = sidebarSelection { sidebarSelection = nil }
             return
         }
 
-        inboxItems = try await InboxScanner().scanInbox(at: vaultURL)
+        inboxItems = try await InboxScanner().scanInbox(fileSystem: vaultFileSystem)
         if case let .inbox(id) = sidebarSelection,
            !inboxItems.contains(where: { $0.id == id }) {
             sidebarSelection = nil
@@ -891,7 +896,7 @@ final class AppState: ObservableObject {
         let targetFolder = (folder ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let filename = (item.path as NSString).lastPathComponent
         let destination = await uniqueRelativeDestination(
-            folder: targetFolder, filename: filename, fileSystem: LocalFileSystem(root: vaultURL))
+            folder: targetFolder, filename: filename, fileSystem: vaultFileSystem ?? LocalFileSystem(root: vaultURL))
         do {
             try await fileInboxItem(item, toRelativePath: destination, vaultURL: vaultURL)
         } catch {
@@ -903,7 +908,7 @@ final class AppState: ObservableObject {
     /// from the in-memory inbox list (a full re-scan is async; `openVault`'s reindex re-scans
     /// shortly after), clear the selection, and reopen the vault to pick up the new document.
     private func fileInboxItem(_ item: InboxItem, toRelativePath destination: String, vaultURL: URL) async throws {
-        try await InboxAccepter().accept(item, toRelativePath: destination, fileSystem: LocalFileSystem(root: vaultURL))
+        try await InboxAccepter().accept(item, toRelativePath: destination, fileSystem: vaultFileSystem ?? LocalFileSystem(root: vaultURL))
         inboxItems.removeAll { $0.id == item.id }
         sidebarSelection = nil
         openVault(vaultURL)
@@ -927,7 +932,7 @@ final class AppState: ObservableObject {
         let ext = (relativePath as NSString).pathExtension.lowercased()
         guard ext == "html" || ext == "htm" else { return }
 
-        let fileSystem = LocalFileSystem(root: vaultURL)
+        let fileSystem = vaultFileSystem ?? LocalFileSystem(root: vaultURL)
         if !(await fileSystem.exists(at: relativePath)) {
             let filename = (relativePath as NSString).lastPathComponent
             let title = edge.linkText.isEmpty ? (filename as NSString).deletingPathExtension : edge.linkText
@@ -980,7 +985,7 @@ final class AppState: ObservableObject {
         let base = (filename as NSString).deletingPathExtension
         let ext = (filename as NSString).pathExtension
         let copyName = ext.isEmpty ? "\(base) copy" : "\(base) copy.\(ext)"
-        let fileSystem = LocalFileSystem(root: vaultURL)
+        let fileSystem = vaultFileSystem ?? LocalFileSystem(root: vaultURL)
         let destination = await uniqueRelativeDestination(folder: folder, filename: copyName, fileSystem: fileSystem)
         do {
             try await fileSystem.copy(from: document.path, to: destination)
@@ -1007,7 +1012,7 @@ final class AppState: ObservableObject {
         }
 
         let filename = (document.path as NSString).lastPathComponent
-        let fileSystem = LocalFileSystem(root: vaultURL)
+        let fileSystem = vaultFileSystem ?? LocalFileSystem(root: vaultURL)
         let destination = await uniqueRelativeDestination(folder: targetFolder, filename: filename, fileSystem: fileSystem)
         do {
             try await fileSystem.createDirectory(at: (destination as NSString).deletingLastPathComponent)
@@ -1039,7 +1044,7 @@ final class AppState: ObservableObject {
         }
         guard filename != (document.path as NSString).lastPathComponent else { return }
 
-        let fileSystem = LocalFileSystem(root: vaultURL)
+        let fileSystem = vaultFileSystem ?? LocalFileSystem(root: vaultURL)
         let destination = await uniqueRelativeDestination(folder: folder, filename: filename, fileSystem: fileSystem)
         do {
             try await fileSystem.move(from: document.path, to: destination)
@@ -1055,7 +1060,7 @@ final class AppState: ObservableObject {
     func trashDocument(_ document: DocumentNode) async {
         guard let vaultURL else { return }
         do {
-            try await LocalFileSystem(root: vaultURL).trash(at: document.path)
+            try await (vaultFileSystem ?? LocalFileSystem(root: vaultURL)).trash(at:document.path)
         } catch {
             errorMessage = error.localizedDescription
             return
@@ -1087,7 +1092,7 @@ final class AppState: ObservableObject {
             errorMessage = "A document name can’t start with a dot."
             return
         }
-        let fileSystem = LocalFileSystem(root: vaultURL)
+        let fileSystem = vaultFileSystem ?? LocalFileSystem(root: vaultURL)
         let destination = await uniqueRelativeDestination(folder: targetFolder, filename: filename, fileSystem: fileSystem)
         let title = (filename as NSString).deletingPathExtension
         do {
@@ -1124,7 +1129,7 @@ final class AppState: ObservableObject {
         }
         // Bump "name 2", "name 3", … on collision so "New Folder…" never silently merges
         // into an existing folder (matching duplicate/move/rename/createDocument).
-        let fileSystem = LocalFileSystem(root: vaultURL)
+        let fileSystem = vaultFileSystem ?? LocalFileSystem(root: vaultURL)
         let relative = await uniqueFolderRelativePath(base, fileSystem: fileSystem)
         do {
             try await fileSystem.createDirectory(at: relative)
@@ -1151,7 +1156,7 @@ final class AppState: ObservableObject {
             errorMessage = "Cannot edit a document outside the selected vault."
             return false
         }
-        let fileSystem = LocalFileSystem(root: vaultURL)
+        let fileSystem = vaultFileSystem ?? LocalFileSystem(root: vaultURL)
         do {
             let text = try await fileSystem.readText(at: relativePath)
             let mtime = (try? await fileSystem.metadata(at: relativePath).modificationDate) ?? .distantPast
@@ -1247,7 +1252,7 @@ final class AppState: ObservableObject {
             errorMessage = "Cannot save a document outside the selected vault."
             return false
         }
-        let fileSystem = LocalFileSystem(root: vaultURL)
+        let fileSystem = vaultFileSystem ?? LocalFileSystem(root: vaultURL)
 
         // Conflict pre-check: the file must still hash to the baseline we loaded. A
         // mismatch means it was changed under us (external editor, AI inbox tool, …).
@@ -1281,7 +1286,7 @@ final class AppState: ObservableObject {
         editorConflict = nil
         _ = await writeEditorText(
             conflict.pendingText, toRelativePath: relativePath, documentId: conflict.documentId,
-            fileSystem: LocalFileSystem(root: vaultURL))
+            fileSystem: vaultFileSystem ?? LocalFileSystem(root: vaultURL))
     }
 
     /// Conflict resolution: discard the user's unsaved text and reload the disk version
@@ -1337,7 +1342,7 @@ final class AppState: ObservableObject {
                 }
                 // Re-embed just this document, off-main, after the reindex returned. Never
                 // gates save success — only the embedding is async and strictly downstream.
-                refreshEmbedding(forDocumentId: documentId, in: patched, vaultURL: vaultURL)
+                refreshEmbedding(forDocumentId: documentId, in: patched, fileSystem: fileSystem)
             } catch {
                 // The write already succeeded, so no data is lost; only the in-memory
                 // graph is briefly stale until the next full reindex reconciles it.
@@ -1375,7 +1380,7 @@ final class AppState: ObservableObject {
     func trashInboxItem(_ item: InboxItem) async {
         guard let vaultURL else { return }
         do {
-            try await LocalFileSystem(root: vaultURL).trash(at: item.path)
+            try await (vaultFileSystem ?? LocalFileSystem(root: vaultURL)).trash(at:item.path)
         } catch {
             errorMessage = error.localizedDescription
             return
