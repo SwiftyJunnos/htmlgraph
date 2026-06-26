@@ -1,6 +1,7 @@
 import AppKit
 import HTMLGraphCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct VaultSidebar: View {
     @EnvironmentObject private var appState: AppState
@@ -440,6 +441,16 @@ enum SidebarCommands {
         panel.canCreateDirectories = true
         panel.nameFieldStringValue = defaultFilename
         panel.title = "Download Document"
+        panel.prompt = "Download"
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    static func choosePDFDownloadDestination(defaultFilename: String) -> URL? {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = defaultFilename
+        panel.title = "Download PDF"
         panel.prompt = "Download"
         return panel.runModal() == .OK ? panel.url : nil
     }

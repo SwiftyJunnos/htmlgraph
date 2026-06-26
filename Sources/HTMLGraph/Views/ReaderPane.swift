@@ -57,6 +57,9 @@ struct ReaderPane: View {
     /// synchronous save never writes a stale (debounced) buffer. One per pane; the active
     /// visual editor registers itself.
     @State private var visualBridge = VisualEditorBridge()
+    /// Lets the rendered reader web view hand its current PDF export capability up to the
+    /// native document actions menu.
+    @State private var pdfExportBridge = PDFExportBridge()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -293,6 +296,13 @@ struct ReaderPane: View {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: absolutePath)])
                 }
             }
+            Divider()
+            Button {
+                downloadPDF(for: document)
+            } label: {
+                Label("Download PDF…", systemImage: "doc.richtext")
+            }
+            .disabled(editorMode != .read)
         } label: {
             Image(systemName: "ellipsis.circle")
         }
@@ -385,7 +395,8 @@ struct ReaderPane: View {
                         documentURL: previewFileURL(relativeId: document.id, absolutePath: document.absolutePath),
                         identity: webViewIdentity(for: document, vaultURL: vaultURL),
                         vaultURL: vaultURL,
-                        baseURL: baseURL
+                        baseURL: baseURL,
+                        pdfExportBridge: pdfExportBridge
                     )
                 } else {
                     preparingPreview
@@ -456,7 +467,13 @@ struct ReaderPane: View {
         }
     }
 
-    private func documentWebView(documentURL: URL, identity: String, vaultURL: URL, baseURL: URL) -> some View {
+    private func documentWebView(
+        documentURL: URL,
+        identity: String,
+        vaultURL: URL,
+        baseURL: URL,
+        pdfExportBridge: PDFExportBridge? = nil
+    ) -> some View {
         HTMLDocumentWebView(
             documentURL: documentURL,
             vaultURL: vaultURL,
@@ -474,10 +491,27 @@ struct ReaderPane: View {
                 // Defer out of the WebKit navigation callback so the state change can't
                 // land inside a SwiftUI layout pass.
                 DispatchQueue.main.async { appState.networkBlockedNotice = true }
-            }
+            },
+            pdfExportBridge: pdfExportBridge
         )
         .id(identity)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func downloadPDF(for document: DocumentNode) {
+        let defaultFilename = DocumentPDFExporter.defaultFilename(for: document)
+        guard let destinationURL = SidebarCommands.choosePDFDownloadDestination(defaultFilename: defaultFilename) else {
+            return
+        }
+
+        Task {
+            do {
+                let data = try await pdfExportBridge.export()
+                try data.write(to: destinationURL, options: [.atomic])
+            } catch {
+                appState.errorMessage = error.localizedDescription
+            }
+        }
     }
 
     @ViewBuilder

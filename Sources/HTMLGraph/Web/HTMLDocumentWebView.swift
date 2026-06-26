@@ -40,6 +40,7 @@ struct HTMLDocumentWebView: NSViewRepresentable {
     let onExternalNavigation: (URL) -> Void
     let onNavigationError: (String) -> Void
     let onNetworkBlocked: (URL) -> Void
+    let pdfExportBridge: PDFExportBridge?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -51,7 +52,8 @@ struct HTMLDocumentWebView: NSViewRepresentable {
             onInternalNavigation: onInternalNavigation,
             onExternalNavigation: onExternalNavigation,
             onNavigationError: onNavigationError,
-            onNetworkBlocked: onNetworkBlocked
+            onNetworkBlocked: onNetworkBlocked,
+            pdfExportBridge: pdfExportBridge
         )
     }
 
@@ -75,6 +77,7 @@ struct HTMLDocumentWebView: NSViewRepresentable {
         container.addSubview(webView)
 
         context.coordinator.webView = webView
+        context.coordinator.registerPDFExport(from: webView)
         context.coordinator.prepareContentRulesIfNeeded(in: webView) {
             context.coordinator.load(in: webView)
         }
@@ -92,11 +95,17 @@ struct HTMLDocumentWebView: NSViewRepresentable {
             onInternalNavigation: onInternalNavigation,
             onExternalNavigation: onExternalNavigation,
             onNavigationError: onNavigationError,
-            onNetworkBlocked: onNetworkBlocked
+            onNetworkBlocked: onNetworkBlocked,
+            pdfExportBridge: pdfExportBridge
         )
+        context.coordinator.registerPDFExport(from: webView)
         context.coordinator.prepareContentRulesIfNeeded(in: webView) {
             context.coordinator.load(in: webView)
         }
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.unregisterPDFExport()
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
@@ -109,6 +118,8 @@ struct HTMLDocumentWebView: NSViewRepresentable {
         private var onExternalNavigation: (URL) -> Void
         private var onNavigationError: (String) -> Void
         private var onNetworkBlocked: (URL) -> Void
+        private var pdfExportBridge: PDFExportBridge?
+        private let pdfRegistrationID = UUID()
         private var loadedDocumentURL: URL?
         private var contentRulesInstalled = false
         weak var webView: WKWebView?
@@ -122,7 +133,8 @@ struct HTMLDocumentWebView: NSViewRepresentable {
             onInternalNavigation: @escaping (String) -> Void,
             onExternalNavigation: @escaping (URL) -> Void,
             onNavigationError: @escaping (String) -> Void,
-            onNetworkBlocked: @escaping (URL) -> Void
+            onNetworkBlocked: @escaping (URL) -> Void,
+            pdfExportBridge: PDFExportBridge?
         ) {
             self.documentURL = documentURL
             self.vaultURL = vaultURL
@@ -133,6 +145,7 @@ struct HTMLDocumentWebView: NSViewRepresentable {
             self.onExternalNavigation = onExternalNavigation
             self.onNavigationError = onNavigationError
             self.onNetworkBlocked = onNetworkBlocked
+            self.pdfExportBridge = pdfExportBridge
         }
 
         func update(
@@ -144,7 +157,8 @@ struct HTMLDocumentWebView: NSViewRepresentable {
             onInternalNavigation: @escaping (String) -> Void,
             onExternalNavigation: @escaping (URL) -> Void,
             onNavigationError: @escaping (String) -> Void,
-            onNetworkBlocked: @escaping (URL) -> Void
+            onNetworkBlocked: @escaping (URL) -> Void,
+            pdfExportBridge: PDFExportBridge?
         ) {
             self.documentURL = documentURL
             self.vaultURL = vaultURL
@@ -155,6 +169,18 @@ struct HTMLDocumentWebView: NSViewRepresentable {
             self.onExternalNavigation = onExternalNavigation
             self.onNavigationError = onNavigationError
             self.onNetworkBlocked = onNetworkBlocked
+            self.pdfExportBridge = pdfExportBridge
+        }
+
+        func registerPDFExport(from webView: WKWebView) {
+            pdfExportBridge?.register(id: pdfRegistrationID) { [weak webView] in
+                guard let webView else { throw DocumentPDFExportError.rendererUnavailable }
+                return try await DocumentPDFExporter.pdfData(from: webView)
+            }
+        }
+
+        func unregisterPDFExport() {
+            pdfExportBridge?.unregister(id: pdfRegistrationID)
         }
 
         func prepareContentRulesIfNeeded(in webView: WKWebView, completion: @escaping () -> Void) {

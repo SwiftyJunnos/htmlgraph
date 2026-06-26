@@ -42,6 +42,7 @@
 		01000000000000000000020C /* VaultResourceSchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000001C /* VaultResourceSchemeHandler.swift */; };
 		01000000000000000000020E /* VaultHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000001E /* VaultHTTPServer.swift */; };
 		01000000000000000000020F /* EditorSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01000000000000000000001F /* EditorSession.swift */; };
+		010000000000000000000215 /* DocumentPDFExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000026 /* DocumentPDFExporter.swift */; };
 		010000000000000000000210 /* DocumentSourceEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000020 /* DocumentSourceEditor.swift */; };
 		010000000000000000000211 /* VisualHTMLEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000022 /* VisualHTMLEditor.swift */; };
 		010000000000000000000213 /* RemoteConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010000000000000000000025 /* RemoteConnectView.swift */; };
@@ -117,6 +118,7 @@
 		01000000000000000000001C /* VaultResourceSchemeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultResourceSchemeHandler.swift; sourceTree = "<group>"; };
 		01000000000000000000001E /* VaultHTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultHTTPServer.swift; sourceTree = "<group>"; };
 		01000000000000000000001F /* EditorSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorSession.swift; sourceTree = "<group>"; };
+		010000000000000000000026 /* DocumentPDFExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPDFExporter.swift; sourceTree = "<group>"; };
 		010000000000000000000020 /* DocumentSourceEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentSourceEditor.swift; sourceTree = "<group>"; };
 		010000000000000000000021 /* HTMLBodyReplacer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTMLBodyReplacer.swift; sourceTree = "<group>"; };
 		010000000000000000000022 /* VisualHTMLEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualHTMLEditor.swift; sourceTree = "<group>"; };
@@ -231,6 +233,7 @@
 			isa = PBXGroup;
 			children = (
 				010000000000000000000011 /* AppState.swift */,
+				010000000000000000000026 /* DocumentPDFExporter.swift */,
 				01000000000000000000001F /* EditorSession.swift */,
 				010000000000000000000024 /* GitHubCredentialStore.swift */,
 				010000000000000000000012 /* HTMLGraphApp.swift */,
@@ -416,6 +419,7 @@
 				01000000000000000000020C /* VaultResourceSchemeHandler.swift in Sources */,
 				01000000000000000000020E /* VaultHTTPServer.swift in Sources */,
 				01000000000000000000020F /* EditorSession.swift in Sources */,
+				010000000000000000000215 /* DocumentPDFExporter.swift in Sources */,
 				010000000000000000000210 /* DocumentSourceEditor.swift in Sources */,
 				010000000000000000000211 /* VisualHTMLEditor.swift in Sources */,
 				010000000000000000000213 /* RemoteConnectView.swift in Sources */,
