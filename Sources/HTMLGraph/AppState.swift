@@ -1349,6 +1349,21 @@ final class AppState: ObservableObject {
         index?.backlinks[id]?.count ?? 0
     }
 
+    /// Copies the document's current stored bytes to a user-chosen destination. This goes
+    /// through `VaultFileSystem` so local and remote vaults behave the same way.
+    @discardableResult
+    func downloadDocument(_ document: DocumentNode, to destinationURL: URL) async -> Bool {
+        guard let fileSystem = vaultFileSystem else { return false }
+        do {
+            let data = try await fileSystem.readData(at: document.path)
+            try data.write(to: destinationURL, options: [.atomic])
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     /// Copies a document beside itself ("… copy"), then re-indexes and selects the copy.
     func duplicateDocument(_ document: DocumentNode) async {
         guard let fileSystem = vaultFileSystem else { return }

@@ -233,6 +233,7 @@ private func documentContextMenu(_ document: DocumentNode, appState: AppState) -
         Button("Open in Browser") { SidebarCommands.openInBrowser(absolutePath: document.absolutePath) }
         Button("Reveal in Finder") { SidebarCommands.reveal(absolutePath: document.absolutePath) }
     }
+    Button("Download…") { SidebarActions.download(document, appState: appState) }
     Menu("Copy") {
         Button("Title") { SidebarCommands.copyToPasteboard(document.title) }
         Button("Relative Path") { SidebarCommands.copyToPasteboard(document.path) }
@@ -374,6 +375,16 @@ enum SidebarActions {
         }
     }
 
+    static func download(_ document: DocumentNode, appState: AppState) {
+        let defaultFilename = (document.path as NSString).lastPathComponent
+        guard let destinationURL = SidebarCommands.chooseDownloadDestination(defaultFilename: defaultFilename) else {
+            return
+        }
+        Task {
+            await appState.downloadDocument(document, to: destinationURL)
+        }
+    }
+
     /// Files an unfiled inbox item into the vault. Guarded because `addToVault` accepts the
     /// item and reopens the vault (`acceptInboxItem` → `openVault` → `beginSession`), a full
     /// reindex that clears `editorBuffer` — so an open, unsaved editor must be confirmed
@@ -422,6 +433,15 @@ enum SidebarCommands {
     static func copyToPasteboard(_ string: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(string, forType: .string)
+    }
+
+    static func chooseDownloadDestination(defaultFilename: String) -> URL? {
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = defaultFilename
+        panel.title = "Download Document"
+        panel.prompt = "Download"
+        return panel.runModal() == .OK ? panel.url : nil
     }
 
     /// An `<a href>` snippet pointing at the document by its vault-relative path, ready

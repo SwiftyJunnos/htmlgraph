@@ -367,6 +367,36 @@ final class AppStateSecurityPolicyTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: vaultURL.appendingPathComponent("notes.txt").path))
     }
 
+    func testDownloadDocumentCopiesOriginalBytesToChosenDestination() async throws {
+        let html = "<!doctype html><html><body><p>&amp;</p></body></html>"
+        let vaultURL = try makeTemporaryVault(files: ["notes/page.html": html])
+        let destinationRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HTMLGraphDownloadTests-\(UUID().uuidString)", isDirectory: true)
+        let destinationURL = destinationRoot.appendingPathComponent("exported-page.html")
+        defer {
+            try? FileManager.default.removeItem(at: vaultURL)
+            try? FileManager.default.removeItem(at: destinationRoot)
+        }
+        try FileManager.default.createDirectory(at: destinationRoot, withIntermediateDirectories: true)
+
+        let appState = AppState()
+        appState.vaultFileSystem = LocalFileSystem(root: vaultURL)
+        let document = DocumentNode(
+            id: "notes/page.html",
+            path: "notes/page.html",
+            absolutePath: vaultURL.appendingPathComponent("notes/page.html").path,
+            title: "Page",
+            contentHash: "hash",
+            lastModified: .distantPast
+        )
+
+        let didDownload = await appState.downloadDocument(document, to: destinationURL)
+
+        XCTAssertTrue(didDownload)
+        XCTAssertEqual(try Data(contentsOf: destinationURL), Data(html.utf8))
+        XCTAssertNil(appState.errorMessage)
+    }
+
     private func makeTemporaryVault(files: [String: String]) throws -> URL {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("HTMLGraphAppStateTests-\(UUID().uuidString)", isDirectory: true)
